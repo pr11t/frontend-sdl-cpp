@@ -34,6 +34,13 @@ set_target_properties(projectMSDL PROPERTIES
         MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/resources/Info.plist.in"
         )
 
+if (ENABLE_GLES)
+    target_compile_definitions(projectMSDL
+            PUBLIC
+            USE_GLES
+            )
+endif ()
+
 if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
     target_sources(projectMSDL
             PRIVATE
@@ -56,7 +63,7 @@ else ()
             )
 endif ()
 
-# GLEW needs to be initialized if libprojectM depends on it.
+# GLEW needs to be initialized if libprojectM depends on it (<v4.2).
 if (TARGET GLEW::glew OR TARGET GLEW::glew_s)
     target_compile_definitions(projectMSDL
             PRIVATE
@@ -81,6 +88,7 @@ target_link_libraries(projectMSDL
         Poco::Util
         SDL2::SDL2$<$<STREQUAL:${SDL2_LINKAGE},static>:-static>
         SDL2::SDL2main
+        OpenGL::$<IF:$<BOOL:${ENABLE_GLES}>,GLES3,GL>
         )
 
 if (MSVC)
