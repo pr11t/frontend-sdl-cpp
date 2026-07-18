@@ -712,6 +712,67 @@ void ApiRequestHandler::handleRequest(Poco::Net::HTTPServerRequest& request,
             }
         }
 
+        if (path == "/api/v1/toast")
+        {
+            // Displays an on-screen text overlay using the app's existing toast
+            // (Dear ImGui) renderer.
+            if (method != "POST")
+            {
+                return MethodNotAllowed(response, "POST");
+            }
+            std::string body;
+            if (!ReadBody(request, response, controlBodyLimit, body))
+            {
+                return;
+            }
+            const auto object = ParseObject(body);
+            if (!Fields(object, {"text", "durationSeconds"}, response))
+            {
+                return;
+            }
+            if (!object->has("text") || !object->get("text").isString())
+            {
+                return WriteError(response, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
+                                  "invalid_request", "text is required and must be a string.");
+            }
+            const auto text = object->getValue<std::string>("text");
+            if (text.empty() || text.size() > 500)
+            {
+                return WriteError(response, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
+                                  "invalid_request", "text must be 1-500 characters.");
+            }
+            double durationSeconds = 3.0;
+            if (object->has("durationSeconds"))
+            {
+                const auto value = object->get("durationSeconds");
+                if (!value.isNumeric())
+                {
+                    return WriteError(response, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
+                                      "invalid_request", "durationSeconds must be a number.");
+                }
+                durationSeconds = value.convert<double>();
+                if (!std::isfinite(durationSeconds) || durationSeconds < 0.5 || durationSeconds > 60.0)
+                {
+                    return WriteError(response, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
+                                      "invalid_request", "durationSeconds must be between 0.5 and 60.");
+                }
+            }
+
+            ControlCommand command;
+            command.type = ControlCommandType::ShowToast;
+            command.payload = text;
+            command.toastSeconds = static_cast<float>(durationSeconds);
+            if (!_commands.TryEnqueue(command))
+            {
+                return WriteError(response, Poco::Net::HTTPResponse::HTTP_SERVICE_UNAVAILABLE,
+                                  "queue_full", "The remote-control command queue is full.");
+            }
+            Poco::JSON::Object result;
+            result.set("ok", true);
+            result.set("queued", true);
+            return WriteJson(response, Poco::Net::HTTPResponse::HTTP_ACCEPTED, result);
+        }
+
         if (path == "/api/v1/visual")
         {
             if (method == "GET")

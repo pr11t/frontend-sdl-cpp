@@ -12,10 +12,13 @@ public:
 
     DisplayToastNotification() = delete;
 
-    explicit DisplayToastNotification(std::string toastText);
+    explicit DisplayToastNotification(std::string toastText, float displayTime = 3.0f);
 
     const std::string& ToastText() const;
 
+    float DisplayTime() const;
+
 private:
     std::string _toastText;
+    float _displayTime;
 };

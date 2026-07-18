@@ -238,6 +238,6 @@ void ProjectMGUI::DisplayToastNotificationHandler(const Poco::AutoPtr<DisplayToa
 {
     if (Poco::Util::Application::instance().config().getBool("projectM.displayToasts", true))
     {
-        _toast = std::make_unique<ToastMessage>(notification->ToastText(), 3.0f);
+        _toast = std::make_unique<ToastMessage>(notification->ToastText(), notification->DisplayTime());
     }
 }

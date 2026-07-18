@@ -1,7 +1,8 @@
 #include "DisplayToastNotification.h"
 
-DisplayToastNotification::DisplayToastNotification(std::string toastText)
+DisplayToastNotification::DisplayToastNotification(std::string toastText, float displayTime)
     : _toastText(std::move(toastText))
+    , _displayTime(displayTime)
 {
 }
 
@@ -13,4 +14,9 @@ std::string DisplayToastNotification::name() const
 const std::string& DisplayToastNotification::ToastText() const
 {
     return _toastText;
+}
+
+float DisplayToastNotification::DisplayTime() const
+{
+    return _displayTime;
 }

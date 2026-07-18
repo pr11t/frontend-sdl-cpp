@@ -156,6 +156,13 @@ void RenderLoop::DrainNetworkCommands()
                 // are re-fetched via the texture-load callback.
                 projectm_reset_textures(_projectMHandle);
                 continue;
+
+            case ControlCommandType::ShowToast:
+                // Posted on the render thread so the GUI observer mutates the
+                // toast state on the same thread that draws it.
+                Poco::NotificationCenter::defaultCenter().postNotification(
+                    new DisplayToastNotification(command.payload, command.toastSeconds));
+                continue;
         }
 
         Poco::NotificationCenter::defaultCenter().postNotification(

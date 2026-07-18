@@ -426,6 +426,36 @@ Removes all textures and reports how many were `cleared`.
 > they are never written to disk. Each change reloads all textures, so this is
 > intended for occasional updates (e.g. once per track), not per-frame updates.
 
+## Text overlay (toast)
+
+Displays a short text message over the visualization using the application's
+built-in on-screen text renderer (the same toast mechanism used for internal
+notifications). Useful for "now playing" text, status messages, etc.
+
+```http
+POST /api/v1/toast
+Content-Type: application/json
+```
+
+| Field | Type and range |
+| --- | --- |
+| `text` | String, 1–500 characters (required) |
+| `durationSeconds` | Number from `0.5` through `60`; default `3` (optional) |
+
+```sh
+curl -s -X POST \
+  -H 'Content-Type: application/json' \
+  -d '{"text":"Now Playing: Artist - Title","durationSeconds":5}' \
+  http://127.0.0.1:8080/api/v1/toast
+```
+
+The toast is queued and rendered on the next frame. Text rendering happens in
+the application, so the request carries a plain string — no image is needed.
+
+> [!NOTE]
+> Toasts respect the `projectM.displayToasts` setting; if it is disabled, the
+> message is accepted but not shown.
+
 ## Visual controls
 
 Start the application with post-processing enabled:
