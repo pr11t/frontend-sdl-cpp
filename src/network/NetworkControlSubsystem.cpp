@@ -1,14 +1,18 @@
 #include "network/NetworkControlSubsystem.h"
 
 #include <Poco/Exception.h>
+#include <Poco/Util/AbstractConfiguration.h>
 #include <Poco/Util/Application.h>
 
 #include <limits>
+#include <memory>
 #include <stdexcept>
+#include <string>
+#include <vector>
 
 NetworkControlSubsystem::NetworkControlSubsystem()
     : _commands(256)
-    , _server(_commands)
+    , _jobs(256)
 {
 }
 
@@ -20,6 +24,11 @@ const char* NetworkControlSubsystem::name() const
 ControlCommandQueue& NetworkControlSubsystem::Commands()
 {
     return _commands;
+}
+
+JobRegistry& NetworkControlSubsystem::Jobs()
+{
+    return _jobs;
 }
 
 void NetworkControlSubsystem::initialize(Poco::Util::Application& app)
@@ -39,7 +48,32 @@ void NetworkControlSubsystem::initialize(Poco::Util::Application& app)
 
     try
     {
-        _server.Start(bindAddress, static_cast<std::uint16_t>(configuredPort));
+        std::vector<std::string> bundledRoots;
+        const auto projectMConfig = app.config().createView("projectM");
+        const auto defaultPresetPath = projectMConfig->getString("presetPath", "");
+        if (!defaultPresetPath.empty())
+        {
+            bundledRoots.push_back(defaultPresetPath);
+        }
+        Poco::Util::AbstractConfiguration::Keys pathKeys;
+        projectMConfig->keys("presetPath", pathKeys);
+        for (const auto& key : pathKeys)
+        {
+            const auto path = projectMConfig->getString("presetPath." + key, "");
+            if (!path.empty())
+            {
+                bundledRoots.push_back(path);
+            }
+        }
+
+        const auto workspace = app.config().getString(
+            "network.presetWorkspace",
+            app.config().getString("system.configHomeDir") + "/projectM/presets");
+        const auto maxPresetBytes = app.config().getUInt64("network.maxPresetBytes", 1048576);
+        _presets = std::make_unique<PresetRepository>(
+            workspace, bundledRoots, static_cast<std::size_t>(maxPresetBytes));
+        _server = std::make_unique<HttpApiServer>(_commands, _jobs, *_presets);
+        _server->Start(bindAddress, static_cast<std::uint16_t>(configuredPort));
         poco_information_f2(_logger, "Unauthenticated HTTP remote-control API listening on %s:%?d.",
                             bindAddress, configuredPort);
     }
@@ -52,5 +86,10 @@ void NetworkControlSubsystem::initialize(Poco::Util::Application& app)
 
 void NetworkControlSubsystem::uninitialize()
 {
-    _server.Stop();
+    if (_server)
+    {
+        _server->Stop();
+        _server.reset();
+    }
+    _presets.reset();
 }

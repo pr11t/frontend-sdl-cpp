@@ -1,6 +1,8 @@
 #pragma once
 
 #include "network/ControlCommandQueue.h"
+#include "network/JobRegistry.h"
+#include "network/PresetRepository.h"
 
 #include <Poco/Net/HTTPServer.h>
 
@@ -11,7 +13,8 @@
 class HttpApiServer
 {
 public:
-    explicit HttpApiServer(ControlCommandQueue& commands);
+    HttpApiServer(ControlCommandQueue& commands, JobRegistry& jobs,
+                  PresetRepository& presets);
     ~HttpApiServer();
 
     void Start(const std::string& bindAddress, std::uint16_t port);
@@ -22,6 +25,8 @@ public:
 
 private:
     ControlCommandQueue& _commands;
+    JobRegistry& _jobs;
+    PresetRepository& _presets;
     std::unique_ptr<Poco::Net::HTTPServer> _server;
     std::uint16_t _port{0};
 };

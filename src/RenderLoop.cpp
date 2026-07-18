@@ -81,6 +81,31 @@ void RenderLoop::DrainNetworkCommands()
             case ControlCommandType::PreviousPreset:
                 action = PlaybackControlNotification::Action::PreviousPreset;
                 break;
+
+            case ControlCommandType::LoadPresetFile:
+            case ControlCommandType::ReloadCurrentPreset:
+            case ControlCommandType::LoadPresetSource: {
+                _networkControl.Jobs().MarkRunning(command.jobId);
+                std::string error;
+                bool success = false;
+                if (command.type == ControlCommandType::LoadPresetFile)
+                {
+                    success = _projectMWrapper.LoadPresetFile(
+                        command.payload, command.smoothTransition, error);
+                }
+                else if (command.type == ControlCommandType::ReloadCurrentPreset)
+                {
+                    success = _projectMWrapper.ReloadCurrentPreset(
+                        command.smoothTransition, error);
+                }
+                else
+                {
+                    success = _projectMWrapper.LoadPresetSource(
+                        command.payload, command.smoothTransition, error);
+                }
+                _networkControl.Jobs().Complete(command.jobId, success, error);
+                continue;
+            }
         }
 
         Poco::NotificationCenter::defaultCenter().postNotification(

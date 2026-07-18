@@ -80,6 +80,11 @@ public:
      */
     void PresetFileNameToClipboard() const;
 
+    bool LoadPresetFile(const std::string& filename, bool smoothTransition, std::string& error);
+    bool LoadPresetSource(const std::string& source, bool smoothTransition, std::string& error);
+    bool ReloadCurrentPreset(bool smoothTransition, std::string& error);
+    const std::string& CurrentPresetFile() const;
+
 private:
     /**
      * @brief projectM callback. Called whenever a preset is switched.
@@ -88,6 +93,7 @@ private:
      * @param context Callback context, e.g. "this" pointer.
      */
     static void PresetSwitchedEvent(bool isHardCut, unsigned int index, void* context);
+    static void CapturePresetLoadFailure(const char* filename, const char* message, void* context);
 
     void PlaybackControlNotificationHandler(const Poco::AutoPtr<PlaybackControlNotification>& notification);
 
@@ -110,6 +116,7 @@ private:
 
     projectm_handle _projectM{nullptr}; //!< Pointer to the projectM instance used by the application.
     projectm_playlist_handle _playlist{nullptr}; //!< Pointer to the projectM playlist manager instance.
+    std::string _currentPresetFile;
 
     Poco::NObserver<ProjectMWrapper, PlaybackControlNotification> _playbackControlNotificationObserver{*this, &ProjectMWrapper::PlaybackControlNotificationHandler};
 

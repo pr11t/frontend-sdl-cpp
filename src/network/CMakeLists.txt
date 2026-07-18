@@ -6,6 +6,10 @@ add_library(ProjectMSDL-Network STATIC
         ControlCommandQueue.h
         HttpApiServer.cpp
         HttpApiServer.h
+        JobRegistry.cpp
+        JobRegistry.h
+        PresetRepository.cpp
+        PresetRepository.h
         )
 
 target_include_directories(ProjectMSDL-Network

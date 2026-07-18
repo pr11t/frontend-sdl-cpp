@@ -396,13 +396,10 @@ void SDLRenderingWindow::UpdateWindowTitle()
         auto& app = Poco::Util::Application::instance();
         auto& projectMWrapper = app.getSubsystem<ProjectMWrapper>();
 
-        auto presetName = projectm_playlist_item(projectMWrapper.Playlist(), projectm_playlist_get_position(projectMWrapper.Playlist()));
-
-        if (presetName)
+        const auto& presetName = projectMWrapper.CurrentPresetFile();
+        if (!presetName.empty())
         {
             Poco::Path presetFile(presetName);
-            projectm_playlist_free_string(presetName);
-
             newTitle += " ➫ " + presetFile.getBaseName();
         }
 

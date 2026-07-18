@@ -247,6 +247,10 @@ void ProjectMSDLApplication::defineOptions(Poco::Util::OptionSet& options)
     options.addOption(Option("networkPort", "", "TCP port on which the HTTP remote-control API listens.",
                              false, "<number>", true)
                           .binding("network.port", _commandLineOverrides));
+
+    options.addOption(Option("presetWorkspace", "", "Writable directory used by the preset-development API.",
+                             false, "<path>", true)
+                          .binding("network.presetWorkspace", _commandLineOverrides));
 }
 
 int ProjectMSDLApplication::main(POCO_UNUSED const std::vector<std::string>& args)

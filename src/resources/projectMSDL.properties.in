@@ -110,6 +110,10 @@ network.enabled = true
 network.bindAddress = 0.0.0.0
 network.port = 8080
 
+# Writable root exposed by the preset-development API. Bundled preset paths remain read-only.
+network.presetWorkspace = ${system.configHomeDir}/projectM/presets
+network.maxPresetBytes = 1048576
+
 
 ### Logging settings
 

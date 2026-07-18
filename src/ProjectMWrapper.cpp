@@ -208,9 +208,69 @@ std::string ProjectMWrapper::ProjectMRuntimeVersion()
 
 void ProjectMWrapper::PresetFileNameToClipboard() const
 {
-    auto presetName = projectm_playlist_item(_playlist, projectm_playlist_get_position(_playlist));
-    SDL_SetClipboardText(presetName);
-    projectm_playlist_free_string(presetName);
+    SDL_SetClipboardText(_currentPresetFile.c_str());
+}
+
+namespace {
+struct PresetLoadFailure
+{
+    bool failed{false};
+    std::string message;
+};
+}
+
+bool ProjectMWrapper::LoadPresetFile(const std::string& filename, bool smoothTransition, std::string& error)
+{
+    PresetLoadFailure failure;
+    projectm_set_preset_switch_failed_event_callback(_projectM, &ProjectMWrapper::CapturePresetLoadFailure, &failure);
+    projectm_load_preset_file(_projectM, filename.c_str(), smoothTransition);
+    projectm_playlist_connect(_playlist, _projectM);
+    if (failure.failed)
+    {
+        error = failure.message;
+        return false;
+    }
+    _currentPresetFile = filename;
+    Poco::NotificationCenter::defaultCenter().postNotification(new UpdateWindowTitleNotification);
+    return true;
+}
+
+bool ProjectMWrapper::LoadPresetSource(const std::string& source, bool smoothTransition, std::string& error)
+{
+    PresetLoadFailure failure;
+    projectm_set_preset_switch_failed_event_callback(_projectM, &ProjectMWrapper::CapturePresetLoadFailure, &failure);
+    projectm_load_preset_data(_projectM, source.c_str(), smoothTransition);
+    projectm_playlist_connect(_playlist, _projectM);
+    if (failure.failed)
+    {
+        error = failure.message;
+        return false;
+    }
+    _currentPresetFile.clear();
+    Poco::NotificationCenter::defaultCenter().postNotification(new UpdateWindowTitleNotification);
+    return true;
+}
+
+bool ProjectMWrapper::ReloadCurrentPreset(bool smoothTransition, std::string& error)
+{
+    if (_currentPresetFile.empty())
+    {
+        error = "The current preset was loaded from memory and has no file to reload.";
+        return false;
+    }
+    return LoadPresetFile(_currentPresetFile, smoothTransition, error);
+}
+
+const std::string& ProjectMWrapper::CurrentPresetFile() const
+{
+    return _currentPresetFile;
+}
+
+void ProjectMWrapper::CapturePresetLoadFailure(const char*, const char* message, void* context)
+{
+    auto* failure = static_cast<PresetLoadFailure*>(context);
+    failure->failed = true;
+    failure->message = message ? message : "Preset loading failed.";
 }
 
 void ProjectMWrapper::PresetSwitchedEvent(bool isHardCut, unsigned int index, void* context)
@@ -218,6 +278,7 @@ void ProjectMWrapper::PresetSwitchedEvent(bool isHardCut, unsigned int index, vo
     auto that = reinterpret_cast<ProjectMWrapper*>(context);
     auto presetName = projectm_playlist_item(that->_playlist, index);
     poco_information_f1(that->_logger, "Displaying preset: %s", std::string(presetName));
+    that->_currentPresetFile = presetName;
     projectm_playlist_free_string(presetName);
 
     Poco::NotificationCenter::defaultCenter().postNotification(new UpdateWindowTitleNotification);
