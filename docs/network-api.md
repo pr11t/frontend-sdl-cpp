@@ -90,6 +90,29 @@ curl -s http://127.0.0.1:8080/api/v1/health
 
 ## Playback
 
+### Current preset
+
+```http
+GET /api/v1/playback/current
+```
+
+Returns the active preset's file name without exposing its filesystem path:
+
+```json
+{
+  "ok": true,
+  "name": "Artist - Example.milk",
+  "fileBacked": true
+}
+```
+
+`name` is empty and `fileBacked` is `false` before a preset is active or when
+the current preset was loaded from unsaved in-memory source.
+
+```sh
+curl -s http://127.0.0.1:8080/api/v1/playback/current
+```
+
 ### Next preset
 
 ```http

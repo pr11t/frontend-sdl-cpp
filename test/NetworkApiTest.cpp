@@ -1,6 +1,7 @@
 #include "network/ControlCommandQueue.h"
 #include "network/HttpApiServer.h"
 #include "network/JobRegistry.h"
+#include "network/PlaybackState.h"
 #include "network/PresetRepository.h"
 #include "network/VisualState.h"
 
@@ -86,7 +87,8 @@ void RunTests()
     }
     PresetRepository presets(workspace, {bundled}, 1024 * 1024);
     VisualStateStore visuals;
-    HttpApiServer server(queue, jobs, presets, visuals);
+    PlaybackStateStore playback;
+    HttpApiServer server(queue, jobs, presets, visuals, playback);
     server.Start("127.0.0.1", 0);
     Require(server.Running(), "Server should be running.");
     Require(server.Port() != 0, "Ephemeral server port should be assigned.");
@@ -95,6 +97,24 @@ void RunTests()
     Require(health.status == Poco::Net::HTTPResponse::HTTP_OK, "Health should return 200.");
     Require(health.body->getValue<bool>("ok"), "Health response should be successful.");
     Require(health.body->getValue<int>("apiVersion") == 1, "Health API version should be 1.");
+
+    auto noCurrentPreset = Request(server.Port(), "GET",
+                                   "/api/v1/playback/current");
+    Require(noCurrentPreset.status == Poco::Net::HTTPResponse::HTTP_OK,
+            "Current preset should return 200.");
+    Require(noCurrentPreset.body->getValue<std::string>("name").empty(),
+            "Current preset name should initially be empty.");
+    Require(!noCurrentPreset.body->getValue<bool>("fileBacked"),
+            "An empty current preset should not be file-backed.");
+
+    playback.SetCurrentPresetFile("/presets/Artist - Example.milk");
+    auto currentPreset = Request(server.Port(), "GET",
+                                 "/api/v1/playback/current");
+    Require(currentPreset.body->getValue<std::string>("name") ==
+                "Artist - Example.milk",
+            "Current preset should return only the file name.");
+    Require(currentPreset.body->getValue<bool>("fileBacked"),
+            "A preset file should be reported as file-backed.");
 
     auto visualDisabled = Request(server.Port(), "GET", "/api/v1/visual");
     Require(visualDisabled.status == Poco::Net::HTTPResponse::HTTP_OK,

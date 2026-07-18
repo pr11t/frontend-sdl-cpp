@@ -33,6 +33,8 @@ void RenderLoop::Run()
     notificationCenter.addObserver(_quitNotificationObserver);
 
     _projectMWrapper.DisplayInitialPreset();
+    _networkControl.Playback().SetCurrentPresetFile(
+        _projectMWrapper.CurrentPresetFile());
     CheckViewportSize();
     if (_networkControl.Visuals().Get().enabled &&
         !_visualPostProcessor.Initialize(_renderWidth, _renderHeight))
@@ -58,6 +60,8 @@ void RenderLoop::Run()
         {
             _projectMWrapper.RenderFrame();
         }
+        _networkControl.Playback().SetCurrentPresetFile(
+            _projectMWrapper.CurrentPresetFile());
         _projectMGui.Draw();
 
         _sdlRenderingWindow.Swap();

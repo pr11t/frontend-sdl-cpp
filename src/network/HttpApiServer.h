@@ -2,6 +2,7 @@
 
 #include "network/ControlCommandQueue.h"
 #include "network/JobRegistry.h"
+#include "network/PlaybackState.h"
 #include "network/PresetRepository.h"
 #include "network/VisualState.h"
 
@@ -15,7 +16,8 @@ class HttpApiServer
 {
 public:
     HttpApiServer(ControlCommandQueue& commands, JobRegistry& jobs,
-                  PresetRepository& presets, VisualStateStore& visuals);
+                  PresetRepository& presets, VisualStateStore& visuals,
+                  PlaybackStateStore& playback);
     ~HttpApiServer();
 
     void Start(const std::string& bindAddress, std::uint16_t port);
@@ -29,6 +31,7 @@ private:
     JobRegistry& _jobs;
     PresetRepository& _presets;
     VisualStateStore& _visuals;
+    PlaybackStateStore& _playback;
     std::unique_ptr<Poco::Net::HTTPServer> _server;
     std::uint16_t _port{0};
 };

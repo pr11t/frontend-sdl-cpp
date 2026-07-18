@@ -8,6 +8,8 @@ add_library(ProjectMSDL-Network STATIC
         HttpApiServer.h
         JobRegistry.cpp
         JobRegistry.h
+        PlaybackState.cpp
+        PlaybackState.h
         PresetRepository.cpp
         PresetRepository.h
         VisualState.cpp

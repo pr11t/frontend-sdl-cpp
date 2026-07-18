@@ -207,11 +207,13 @@ std::string QueryValue(const Poco::URI& uri, const std::string& key, const std::
 } // namespace
 
 ApiRequestHandler::ApiRequestHandler(ControlCommandQueue& commands, JobRegistry& jobs,
-                                     PresetRepository& presets, VisualStateStore& visuals)
+                                     PresetRepository& presets, VisualStateStore& visuals,
+                                     PlaybackStateStore& playback)
     : _commands(commands)
     , _jobs(jobs)
     , _presets(presets)
     , _visuals(visuals)
+    , _playback(playback)
 {
 }
 
@@ -377,6 +379,20 @@ void ApiRequestHandler::handleRequest(Poco::Net::HTTPServerRequest& request,
             result.set("ok", true);
             result.set("queued", true);
             return WriteJson(response, Poco::Net::HTTPResponse::HTTP_ACCEPTED, result);
+        }
+
+        if (path == "/api/v1/playback/current")
+        {
+            if (method != "GET")
+            {
+                return MethodNotAllowed(response, "GET");
+            }
+            const auto playback = _playback.Get();
+            Poco::JSON::Object result;
+            result.set("ok", true);
+            result.set("name", playback.presetName);
+            result.set("fileBacked", playback.fileBacked);
+            return WriteJson(response, Poco::Net::HTTPResponse::HTTP_OK, result);
         }
 
         if (path == "/api/v1/playback/next" ||
@@ -653,16 +669,19 @@ void ApiRequestHandler::handleRequest(Poco::Net::HTTPServerRequest& request,
 
 ApiRequestHandlerFactory::ApiRequestHandlerFactory(ControlCommandQueue& commands, JobRegistry& jobs,
                                                    PresetRepository& presets,
-                                                   VisualStateStore& visuals)
+                                                   VisualStateStore& visuals,
+                                                   PlaybackStateStore& playback)
     : _commands(commands)
     , _jobs(jobs)
     , _presets(presets)
     , _visuals(visuals)
+    , _playback(playback)
 {
 }
 
 Poco::Net::HTTPRequestHandler* ApiRequestHandlerFactory::createRequestHandler(
     const Poco::Net::HTTPServerRequest&)
 {
-    return new ApiRequestHandler(_commands, _jobs, _presets, _visuals);
+    return new ApiRequestHandler(_commands, _jobs, _presets, _visuals,
+                                 _playback);
 }

@@ -36,6 +36,11 @@ VisualStateStore& NetworkControlSubsystem::Visuals()
     return _visuals;
 }
 
+PlaybackStateStore& NetworkControlSubsystem::Playback()
+{
+    return _playback;
+}
+
 void NetworkControlSubsystem::initialize(Poco::Util::Application& app)
 {
     _visuals.SetEnabled(app.config().getBool("visual.postProcessingEnabled", false));
@@ -79,7 +84,8 @@ void NetworkControlSubsystem::initialize(Poco::Util::Application& app)
         const auto maxPresetBytes = app.config().getUInt64("network.maxPresetBytes", 1048576);
         _presets = std::make_unique<PresetRepository>(
             workspace, bundledRoots, static_cast<std::size_t>(maxPresetBytes));
-        _server = std::make_unique<HttpApiServer>(_commands, _jobs, *_presets, _visuals);
+        _server = std::make_unique<HttpApiServer>(_commands, _jobs, *_presets,
+                                                  _visuals, _playback);
         _server->Start(bindAddress, static_cast<std::uint16_t>(configuredPort));
         poco_information_f2(_logger, "Unauthenticated HTTP remote-control API listening on %s:%?d.",
                             bindAddress, configuredPort);
