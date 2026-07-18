@@ -43,16 +43,24 @@ public:
     bool Active() const;
 
 private:
+    struct UserParam
+    {
+        std::string name;
+        int location{-1};
+        float value{0.0F};
+    };
+
     struct UserPass
     {
         std::string shaderName;
         std::string textureName;
+        std::size_t chainIndex{0}; //!< Position in the chain, for live params refresh.
         std::uint32_t program{0};
         int inputLocation{-1};
         int textureLocation{-1};
         int resolutionLocation{-1};
         int timeLocation{-1};
-        std::vector<std::pair<int, float>> params; //!< Resolved uniform location + value.
+        std::vector<UserParam> params;
     };
 
     static std::uint32_t CompileShader(std::uint32_t type, const char* source);
@@ -84,6 +92,7 @@ private:
 
     std::vector<UserPass> _passes;
     std::uint64_t _chainGeneration{0};
+    std::uint64_t _paramsGeneration{0};
     std::map<std::string, std::uint32_t> _textureCache; //!< Named texture -> GL texture.
     std::uint64_t _textureStoreGeneration{0};
 

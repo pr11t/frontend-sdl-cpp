@@ -187,62 +187,93 @@ bool VisualPostProcessor::Resize(int width, int height)
 
 void VisualPostProcessor::SyncChain(ShaderChainStore& shaders)
 {
-    const auto generation = shaders.Generation();
-    if (generation == _chainGeneration)
+    const auto structureGeneration = shaders.Generation();
+    if (structureGeneration != _chainGeneration)
     {
+        // Chain structure changed: recompile everything.
+        _chainGeneration = structureGeneration;
+        ClearPasses();
+        const auto snapshot = shaders.GetSnapshot();
+        _paramsGeneration = snapshot.paramsGeneration;
+        for (std::size_t index = 0; index < snapshot.chain.size(); ++index)
+        {
+            const auto& config = snapshot.chain[index];
+            const auto sourceIt = snapshot.sources.find(config.shader);
+            if (sourceIt == snapshot.sources.end())
+            {
+                shaders.SetCompileStatus(config.shader, false, "Shader not found.");
+                continue;
+            }
+
+            const std::string wrapped = userShaderPreamble + sourceIt->second + userShaderEpilogue;
+            std::string error;
+            std::uint32_t vertexShader = 0;
+            std::uint32_t fragmentShader = 0;
+            std::uint32_t program = 0;
+            try
+            {
+                vertexShader = CompileShader(GL_VERTEX_SHADER, vertexShaderSource.c_str());
+                fragmentShader = CompileShader(GL_FRAGMENT_SHADER, wrapped.c_str());
+                program = LinkProgram(vertexShader, fragmentShader);
+            }
+            catch (const std::exception& exception)
+            {
+                error = exception.what();
+            }
+            if (vertexShader != 0) { glDeleteShader(vertexShader); }
+            if (fragmentShader != 0) { glDeleteShader(fragmentShader); }
+
+            if (program == 0)
+            {
+                shaders.SetCompileStatus(config.shader, false, error);
+                continue;
+            }
+
+            UserPass pass;
+            pass.shaderName = config.shader;
+            pass.textureName = config.texture;
+            pass.chainIndex = index;
+            pass.program = program;
+            pass.inputLocation = glGetUniformLocation(program, "uInput");
+            pass.textureLocation = glGetUniformLocation(program, "uTexture");
+            pass.resolutionLocation = glGetUniformLocation(program, "uResolution");
+            pass.timeLocation = glGetUniformLocation(program, "uTime");
+            for (const auto& [paramName, paramValue] : config.params)
+            {
+                UserParam param;
+                param.name = paramName;
+                param.location = glGetUniformLocation(program, paramName.c_str());
+                param.value = paramValue;
+                pass.params.push_back(std::move(param));
+            }
+            _passes.push_back(std::move(pass));
+            shaders.SetCompileStatus(config.shader, true, "");
+        }
         return;
     }
-    _chainGeneration = generation;
 
-    ClearPasses();
-    const auto snapshot = shaders.GetSnapshot();
-    for (const auto& config : snapshot.chain)
+    const auto paramsGeneration = shaders.ParamsGeneration();
+    if (paramsGeneration != _paramsGeneration)
     {
-        const auto sourceIt = snapshot.sources.find(config.shader);
-        if (sourceIt == snapshot.sources.end())
+        // Only parameter values changed: refresh them in place, no recompile.
+        _paramsGeneration = paramsGeneration;
+        const auto snapshot = shaders.GetSnapshot();
+        for (auto& pass : _passes)
         {
-            shaders.SetCompileStatus(config.shader, false, "Shader not found.");
-            continue;
+            if (pass.chainIndex >= snapshot.chain.size())
+            {
+                continue;
+            }
+            const auto& configParams = snapshot.chain[pass.chainIndex].params;
+            for (auto& param : pass.params)
+            {
+                const auto it = configParams.find(param.name);
+                if (it != configParams.end())
+                {
+                    param.value = it->second;
+                }
+            }
         }
-
-        const std::string wrapped = userShaderPreamble + sourceIt->second + userShaderEpilogue;
-        std::string error;
-        std::uint32_t vertexShader = 0;
-        std::uint32_t fragmentShader = 0;
-        std::uint32_t program = 0;
-        try
-        {
-            vertexShader = CompileShader(GL_VERTEX_SHADER, vertexShaderSource.c_str());
-            fragmentShader = CompileShader(GL_FRAGMENT_SHADER, wrapped.c_str());
-            program = LinkProgram(vertexShader, fragmentShader);
-        }
-        catch (const std::exception& exception)
-        {
-            error = exception.what();
-        }
-        if (vertexShader != 0) { glDeleteShader(vertexShader); }
-        if (fragmentShader != 0) { glDeleteShader(fragmentShader); }
-
-        if (program == 0)
-        {
-            shaders.SetCompileStatus(config.shader, false, error);
-            continue;
-        }
-
-        UserPass pass;
-        pass.shaderName = config.shader;
-        pass.textureName = config.texture;
-        pass.program = program;
-        pass.inputLocation = glGetUniformLocation(program, "uInput");
-        pass.textureLocation = glGetUniformLocation(program, "uTexture");
-        pass.resolutionLocation = glGetUniformLocation(program, "uResolution");
-        pass.timeLocation = glGetUniformLocation(program, "uTime");
-        for (const auto& [paramName, paramValue] : config.params)
-        {
-            pass.params.emplace_back(glGetUniformLocation(program, paramName.c_str()), paramValue);
-        }
-        _passes.push_back(std::move(pass));
-        shaders.SetCompileStatus(config.shader, true, "");
     }
 }
 
@@ -332,9 +363,9 @@ void VisualPostProcessor::Render(ProjectMWrapper& projectM, const VisualState& s
                 glUniform2f(pass.resolutionLocation, static_cast<float>(_width), static_cast<float>(_height));
             }
             if (pass.timeLocation >= 0) { glUniform1f(pass.timeLocation, inputs.time); }
-            for (const auto& [location, value] : pass.params)
+            for (const auto& param : pass.params)
             {
-                if (location >= 0) { glUniform1f(location, value); }
+                if (param.location >= 0) { glUniform1f(param.location, param.value); }
             }
         }
 

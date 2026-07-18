@@ -36,6 +36,21 @@ void ShaderChainStore::SetChain(std::vector<ShaderPassConfig> chain)
     ++_generation;
 }
 
+bool ShaderChainStore::UpdateParams(std::size_t index, const std::map<std::string, float>& params)
+{
+    std::lock_guard<std::mutex> lock(_mutex);
+    if (index >= _chain.size())
+    {
+        return false;
+    }
+    for (const auto& [name, value] : params)
+    {
+        _chain[index].params[name] = value;
+    }
+    ++_paramsGeneration;
+    return true;
+}
+
 std::vector<ShaderPassConfig> ShaderChainStore::Chain() const
 {
     std::lock_guard<std::mutex> lock(_mutex);
@@ -48,11 +63,18 @@ std::uint64_t ShaderChainStore::Generation() const
     return _generation;
 }
 
+std::uint64_t ShaderChainStore::ParamsGeneration() const
+{
+    std::lock_guard<std::mutex> lock(_mutex);
+    return _paramsGeneration;
+}
+
 ShaderChainStore::Snapshot ShaderChainStore::GetSnapshot() const
 {
     std::lock_guard<std::mutex> lock(_mutex);
     Snapshot snapshot;
     snapshot.generation = _generation;
+    snapshot.paramsGeneration = _paramsGeneration;
     snapshot.chain = _chain;
     for (const auto& pass : _chain)
     {

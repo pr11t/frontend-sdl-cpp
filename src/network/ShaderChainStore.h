@@ -38,6 +38,7 @@ public:
     struct Snapshot
     {
         std::uint64_t generation{0};
+        std::uint64_t paramsGeneration{0};
         std::vector<ShaderPassConfig> chain;
         std::map<std::string, std::string> sources; //!< Sources for shaders referenced by the chain.
     };
@@ -54,11 +55,22 @@ public:
     /// Replaces the ordered chain. Bumps the generation.
     void SetChain(std::vector<ShaderPassConfig> chain);
 
+    /**
+     * @brief Merges @p params into the params of the chain pass at @p index,
+     * without changing the chain structure. Bumps only the params generation so
+     * the render thread updates uniform values without recompiling.
+     * @return false if @p index is out of range.
+     */
+    bool UpdateParams(std::size_t index, const std::map<std::string, float>& params);
+
     /// Current chain configuration.
     std::vector<ShaderPassConfig> Chain() const;
 
-    /// Current generation counter (cheap to poll from the render thread).
+    /// Structure generation (chain/shaders); a change requires recompilation.
     std::uint64_t Generation() const;
+
+    /// Params generation; a change requires only refreshing uniform values.
+    std::uint64_t ParamsGeneration() const;
 
     /// Snapshot for the render thread: generation, chain, and referenced sources.
     Snapshot GetSnapshot() const;
@@ -81,4 +93,5 @@ private:
     std::map<std::string, ShaderInfo> _shaders;
     std::vector<ShaderPassConfig> _chain;
     std::uint64_t _generation{0};
+    std::uint64_t _paramsGeneration{0};
 };

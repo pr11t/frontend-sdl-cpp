@@ -791,6 +791,35 @@ curl -s -X PUT -H 'Content-Type: application/json' \
   http://127.0.0.1:8080/api/v1/postprocess
 ```
 
+### Tune parameters live
+
+```http
+PATCH /api/v1/postprocess/params
+Content-Type: application/json
+```
+
+Updates the float `params` of one or more passes **without recompiling** the
+chain — suitable for real-time knobs. Each entry targets a pass by its `index`
+in the chain and merges the given params (unlisted params are left unchanged):
+
+```json
+{
+  "passes": [
+    { "index": 0, "params": { "amount": 0.8 } }
+  ]
+}
+```
+
+An out-of-range `index` returns `400 Bad Request`. Changing params via
+`PUT /api/v1/postprocess` also works but recompiles the chain, so prefer this
+endpoint for live tuning.
+
+```sh
+curl -s -X PATCH -H 'Content-Type: application/json' \
+  -d '{"passes":[{"index":0,"params":{"amount":0.95}}]}' \
+  http://127.0.0.1:8080/api/v1/postprocess/params
+```
+
 > [!NOTE]
 > The chain only renders when post-processing is enabled at launch
 > (`--enableVisualPostProcessing`). Shaders can be uploaded either way, but the

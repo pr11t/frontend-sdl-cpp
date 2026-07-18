@@ -960,6 +960,92 @@ void ApiRequestHandler::handleRequest(Poco::Net::HTTPServerRequest& request,
             return WriteJson(response, Poco::Net::HTTPResponse::HTTP_ACCEPTED, result);
         }
 
+        if (path == "/api/v1/postprocess/params")
+        {
+            // Updates pass parameters live, without recompiling the chain.
+            if (method != "PATCH")
+            {
+                return MethodNotAllowed(response, "PATCH");
+            }
+            std::string body;
+            if (!ReadBody(request, response, controlBodyLimit, body))
+            {
+                return;
+            }
+            const auto object = ParseObject(body);
+            if (!Fields(object, {"passes"}, response))
+            {
+                return;
+            }
+            if (!object->has("passes") || !object->isArray("passes"))
+            {
+                return WriteError(response, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
+                                  "invalid_request", "passes must be an array.");
+            }
+            const auto chainSize = _shaders.Chain().size();
+            const auto array = object->getArray("passes");
+            struct PendingParams
+            {
+                std::size_t index;
+                std::map<std::string, float> params;
+            };
+            std::vector<PendingParams> pending;
+            for (std::size_t item = 0; item < array->size(); ++item)
+            {
+                if (!array->isObject(item))
+                {
+                    return WriteError(response, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
+                                      "invalid_request", "Each entry must be an object.");
+                }
+                const auto entry = array->getObject(item);
+                if (!Fields(entry, {"index", "params"}, response))
+                {
+                    return;
+                }
+                if (!entry->has("index") || !entry->get("index").isInteger())
+                {
+                    return WriteError(response, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
+                                      "invalid_request", "Each entry needs an integer index.");
+                }
+                const auto index = entry->getValue<int>("index");
+                if (index < 0 || static_cast<std::size_t>(index) >= chainSize)
+                {
+                    return WriteError(response, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
+                                      "invalid_request", "index is out of range for the current chain.");
+                }
+                std::map<std::string, float> params;
+                if (entry->has("params"))
+                {
+                    if (!entry->isObject("params"))
+                    {
+                        return WriteError(response, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
+                                          "invalid_request", "params must be an object of numbers.");
+                    }
+                    const auto paramsObject = entry->getObject("params");
+                    for (const auto& paramName : paramsObject->getNames())
+                    {
+                        const auto value = paramsObject->get(paramName);
+                        if (!value.isNumeric())
+                        {
+                            return WriteError(response, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
+                                              "invalid_request", "param " + paramName + " must be a number.");
+                        }
+                        params[paramName] = static_cast<float>(value.convert<double>());
+                    }
+                }
+                pending.push_back({static_cast<std::size_t>(index), std::move(params)});
+            }
+
+            for (const auto& item : pending)
+            {
+                _shaders.UpdateParams(item.index, item.params);
+            }
+            Poco::JSON::Object result;
+            result.set("ok", true);
+            result.set("updated", static_cast<int>(pending.size()));
+            return WriteJson(response, Poco::Net::HTTPResponse::HTTP_OK, result);
+        }
+
         if (path == "/api/v1/toast")
         {
             // Displays an on-screen text overlay using the app's existing toast
