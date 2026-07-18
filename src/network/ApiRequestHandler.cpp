@@ -1,5 +1,7 @@
 #include "network/ApiRequestHandler.h"
 
+#include "stb_image.h"
+
 #include <Poco/JSON/Array.h>
 #include <Poco/JSON/Object.h>
 #include <Poco/JSON/Parser.h>
@@ -19,6 +21,57 @@
 namespace {
 
 constexpr std::size_t controlBodyLimit = 4096;
+constexpr std::size_t textureBodyLimit = 16 * 1024 * 1024; //!< 16 MiB cap for texture uploads.
+
+// Decodes JPEG/PNG/BMP bytes into a bottom-row-first RGBA image for projectM's
+// texture-load callback. Returns nullptr if the bytes are not a valid image.
+DecodedImagePtr DecodeImage(const std::string& body)
+{
+    stbi_set_flip_vertically_on_load(1); // projectM expects the first row at the bottom.
+    int width = 0;
+    int height = 0;
+    int channels = 0;
+    unsigned char* pixels = stbi_load_from_memory(
+        reinterpret_cast<const unsigned char*>(body.data()),
+        static_cast<int>(body.size()), &width, &height, &channels, 4);
+    if (pixels == nullptr || width <= 0 || height <= 0)
+    {
+        if (pixels != nullptr)
+        {
+            stbi_image_free(pixels);
+        }
+        return nullptr;
+    }
+    auto image = std::make_shared<DecodedImage>();
+    image->width = width;
+    image->height = height;
+    image->channels = 4;
+    image->pixels.assign(pixels, pixels + static_cast<std::size_t>(width) * height * 4);
+    stbi_image_free(pixels);
+    return image;
+}
+
+// A texture name must be a non-empty run of [A-Za-z0-9_.-] so it is safe to use
+// in a URL path and as a preset texture reference.
+bool ValidTextureName(const std::string& name)
+{
+    if (name.empty() || name.size() > 128)
+    {
+        return false;
+    }
+    for (const char character : name)
+    {
+        const bool ok = (character >= 'a' && character <= 'z') ||
+                        (character >= 'A' && character <= 'Z') ||
+                        (character >= '0' && character <= '9') ||
+                        character == '_' || character == '-' || character == '.';
+        if (!ok)
+        {
+            return false;
+        }
+    }
+    return true;
+}
 
 void WriteJson(Poco::Net::HTTPServerResponse& response,
                Poco::Net::HTTPResponse::HTTPStatus status,
@@ -327,12 +380,14 @@ Poco::Dynamic::Var ConfigEffectiveValue(const ConfigLayers& layers, const Config
 
 ApiRequestHandler::ApiRequestHandler(ControlCommandQueue& commands, JobRegistry& jobs,
                                      PresetRepository& presets, VisualStateStore& visuals,
-                                     PlaybackStateStore& playback, ConfigLayers configLayers)
+                                     PlaybackStateStore& playback, TextureStore& textures,
+                                     ConfigLayers configLayers)
     : _commands(commands)
     , _jobs(jobs)
     , _presets(presets)
     , _visuals(visuals)
     , _playback(playback)
+    , _textures(textures)
     , _configLayers(std::move(configLayers))
 {
 }
@@ -554,6 +609,105 @@ void ApiRequestHandler::handleRequest(Poco::Net::HTTPServerRequest& request,
                 result.set("ok", true);
                 result.set("queued", true);
                 result.set("cleared", option->name);
+                return WriteJson(response, Poco::Net::HTTPResponse::HTTP_ACCEPTED, result);
+            }
+        }
+
+        if (path == "/api/v1/textures")
+        {
+            // Named in-memory textures served to presets via image=<name>.
+            if (method == "GET")
+            {
+                Poco::JSON::Array items;
+                for (const auto& entry : _textures.List())
+                {
+                    Poco::JSON::Object item;
+                    item.set("name", entry.name);
+                    item.set("width", entry.width);
+                    item.set("height", entry.height);
+                    items.add(item);
+                }
+                Poco::JSON::Object body;
+                body.set("ok", true);
+                body.set("textures", items);
+                return WriteJson(response, Poco::Net::HTTPResponse::HTTP_OK, body);
+            }
+            if (method != "DELETE")
+            {
+                return MethodNotAllowed(response, "GET, DELETE");
+            }
+            const auto cleared = _textures.Clear();
+            if (cleared > 0)
+            {
+                ControlCommand command;
+                command.type = ControlCommandType::ReloadTextures;
+                _commands.TryEnqueue(command);
+            }
+            Poco::JSON::Object result;
+            result.set("ok", true);
+            result.set("cleared", static_cast<int>(cleared));
+            return WriteJson(response, Poco::Net::HTTPResponse::HTTP_OK, result);
+        }
+
+        {
+            const std::string texturePrefix = "/api/v1/textures/";
+            if (path.compare(0, texturePrefix.size(), texturePrefix) == 0)
+            {
+                const auto name = path.substr(texturePrefix.size());
+                if (!ValidTextureName(name))
+                {
+                    return WriteError(response, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
+                                      "invalid_texture_name",
+                                      "Texture name must be 1-128 characters of [A-Za-z0-9_.-].");
+                }
+
+                if (method == "DELETE")
+                {
+                    const bool existed = _textures.Remove(name);
+                    if (!existed)
+                    {
+                        return WriteError(response, Poco::Net::HTTPResponse::HTTP_NOT_FOUND,
+                                          "not_found", "No texture named " + name + ".");
+                    }
+                    ControlCommand command;
+                    command.type = ControlCommandType::ReloadTextures;
+                    _commands.TryEnqueue(command);
+                    Poco::JSON::Object result;
+                    result.set("ok", true);
+                    result.set("removed", name);
+                    return WriteJson(response, Poco::Net::HTTPResponse::HTTP_OK, result);
+                }
+                if (method != "PUT")
+                {
+                    return MethodNotAllowed(response, "PUT, DELETE");
+                }
+
+                std::string body;
+                if (!ReadBody(request, response, textureBodyLimit, body))
+                {
+                    return;
+                }
+                const auto image = DecodeImage(body);
+                if (image == nullptr)
+                {
+                    return WriteError(response, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
+                                      "invalid_image",
+                                      "Request body is not a supported image (JPEG, PNG, or BMP).");
+                }
+
+                _textures.Set(name, image);
+                ControlCommand command;
+                command.type = ControlCommandType::ReloadTextures;
+                if (!_commands.TryEnqueue(command))
+                {
+                    return WriteError(response, Poco::Net::HTTPResponse::HTTP_SERVICE_UNAVAILABLE,
+                                      "queue_full", "The remote-control command queue is full.");
+                }
+                Poco::JSON::Object result;
+                result.set("ok", true);
+                result.set("name", name);
+                result.set("width", image->width);
+                result.set("height", image->height);
                 return WriteJson(response, Poco::Net::HTTPResponse::HTTP_ACCEPTED, result);
             }
         }
@@ -990,12 +1144,14 @@ ApiRequestHandlerFactory::ApiRequestHandlerFactory(ControlCommandQueue& commands
                                                    PresetRepository& presets,
                                                    VisualStateStore& visuals,
                                                    PlaybackStateStore& playback,
+                                                   TextureStore& textures,
                                                    ConfigLayers configLayers)
     : _commands(commands)
     , _jobs(jobs)
     , _presets(presets)
     , _visuals(visuals)
     , _playback(playback)
+    , _textures(textures)
     , _configLayers(std::move(configLayers))
 {
 }
@@ -1004,5 +1160,5 @@ Poco::Net::HTTPRequestHandler* ApiRequestHandlerFactory::createRequestHandler(
     const Poco::Net::HTTPServerRequest&)
 {
     return new ApiRequestHandler(_commands, _jobs, _presets, _visuals,
-                                 _playback, _configLayers);
+                                 _playback, _textures, _configLayers);
 }

@@ -16,7 +16,8 @@ enum class ControlCommandType
     UpdateVisualState,
     ResetVisualState,
     SetConfig,
-    ClearConfig
+    ClearConfig,
+    ReloadTextures
 };
 
 struct ControlCommand

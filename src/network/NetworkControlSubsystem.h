@@ -5,6 +5,7 @@
 #include "network/JobRegistry.h"
 #include "network/PlaybackState.h"
 #include "network/PresetRepository.h"
+#include "network/TextureStore.h"
 #include "network/VisualState.h"
 
 #include <Poco/Logger.h>
@@ -23,6 +24,7 @@ public:
     JobRegistry& Jobs();
     VisualStateStore& Visuals();
     PlaybackStateStore& Playback();
+    TextureStore& Textures();
 
 protected:
     void initialize(Poco::Util::Application& app) override;
@@ -33,6 +35,7 @@ private:
     JobRegistry _jobs;
     VisualStateStore _visuals;
     PlaybackStateStore _playback;
+    TextureStore _textures;
     std::unique_ptr<PresetRepository> _presets;
     std::unique_ptr<HttpApiServer> _server;
     Poco::Logger& _logger{Poco::Logger::get("NetworkControl")};

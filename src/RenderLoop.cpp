@@ -11,6 +11,7 @@
 #include <SDL2/SDL.h>
 
 #include "ProjectMSDLApplication.h"
+#include "network/TextureStore.h"
 
 RenderLoop::RenderLoop()
     : _audioCapture(Poco::Util::Application::instance().getSubsystem<AudioCapture>())
@@ -22,6 +23,10 @@ RenderLoop::RenderLoop()
     , _projectMGui(Poco::Util::Application::instance().getSubsystem<ProjectMGUI>())
     , _userConfig(ProjectMSDLApplication::instance().UserConfiguration())
 {
+    // Serve named in-memory textures (e.g. album art) to presets. The callback
+    // runs on this (render) thread, reading the network subsystem's store.
+    projectm_set_texture_load_event_callback(_projectMHandle, &TextureStore::LoadCallback,
+                                             &_networkControl.Textures());
 }
 
 void RenderLoop::Run()
@@ -144,6 +149,12 @@ void RenderLoop::DrainNetworkCommands()
 
             case ControlCommandType::ClearConfig:
                 _projectMWrapper.ClearRuntimeConfig(command.configKey);
+                continue;
+
+            case ControlCommandType::ReloadTextures:
+                // Drop cached textures so newly uploaded/removed named textures
+                // are re-fetched via the texture-load callback.
+                projectm_reset_textures(_projectMHandle);
                 continue;
         }
 

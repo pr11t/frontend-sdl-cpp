@@ -13,6 +13,9 @@ add_library(ProjectMSDL-Network STATIC
         PlaybackState.h
         PresetRepository.cpp
         PresetRepository.h
+        StbImageImpl.cpp
+        TextureStore.cpp
+        TextureStore.h
         VisualState.cpp
         VisualState.h
         )
@@ -20,6 +23,8 @@ add_library(ProjectMSDL-Network STATIC
 target_include_directories(ProjectMSDL-Network
         PUBLIC
         "${CMAKE_SOURCE_DIR}/src"
+        PRIVATE
+        "${CMAKE_SOURCE_DIR}/vendor/stb"
         )
 
 target_link_libraries(ProjectMSDL-Network
@@ -28,4 +33,5 @@ target_link_libraries(ProjectMSDL-Network
         Poco::JSON
         Poco::Net
         Poco::Util
+        libprojectM::projectM
         )

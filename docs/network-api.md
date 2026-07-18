@@ -340,6 +340,92 @@ job includes the parser or loading error when libprojectM provides one:
 
 The server retains a bounded set of recent jobs.
 
+## In-memory textures
+
+Presets can display images (e.g. the current album cover, a logo, a backdrop)
+that are provided **in memory** — no file is written to disk. You upload an
+image under a name of your choice, and a preset references it by that name with
+a textured custom shape:
+
+```text
+shapecode_0_textured=1
+shapecode_0_image=cover
+```
+
+When projectM needs a texture it asks the application, which serves a matching
+uploaded image via a texture-load callback. If no texture with that name has
+been uploaded, projectM falls back to the filesystem (and, if not found there,
+draws a placeholder). Names are matched case-insensitively.
+
+You can store several textures at once and reference each by name from any
+preset.
+
+### Upload a texture
+
+```http
+PUT /api/v1/textures/{name}
+Content-Type: image/jpeg
+```
+
+The name must be 1–128 characters of `[A-Za-z0-9_.-]`. The body is the raw image
+bytes (JPEG, PNG, or BMP, up to 16 MiB). Uploading a name that already exists
+replaces it. The texture cache is reloaded so presets pick up the change
+immediately.
+
+```sh
+curl -s -X PUT \
+  -H 'Content-Type: image/jpeg' \
+  --data-binary @cover.jpg \
+  http://127.0.0.1:8080/api/v1/textures/cover
+```
+
+```json
+{
+  "ok": true,
+  "queued": true,
+  "name": "cover",
+  "width": 500,
+  "height": 500
+}
+```
+
+Invalid names return `400 Bad Request` with code `invalid_texture_name`;
+unsupported image data returns `400` with code `invalid_image`.
+
+### List textures
+
+```http
+GET /api/v1/textures
+```
+
+```json
+{
+  "ok": true,
+  "textures": [
+    { "name": "cover", "width": 500, "height": 500 }
+  ]
+}
+```
+
+### Remove textures
+
+```http
+DELETE /api/v1/textures/{name}
+```
+
+Removes a single texture (`404 Not Found` if it does not exist).
+
+```http
+DELETE /api/v1/textures
+```
+
+Removes all textures and reports how many were `cleared`.
+
+> [!NOTE]
+> Textures live only in memory and are dropped on restart or when replaced —
+> they are never written to disk. Each change reloads all textures, so this is
+> intended for occasional updates (e.g. once per track), not per-frame updates.
+
 ## Visual controls
 
 Start the application with post-processing enabled:
