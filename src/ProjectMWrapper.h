@@ -12,6 +12,7 @@
 #include <Poco/Util/Subsystem.h>
 
 #include <memory>
+#include <cstdint>
 
 class ProjectMWrapper : public Poco::Util::Subsystem
 {
@@ -38,6 +39,7 @@ public:
      * Renders a single projectM frame.
      */
     void RenderFrame() const;
+    void RenderFrameToFramebuffer(std::uint32_t framebuffer) const;
 
     /**
      * @brief Returns the targeted FPS value.

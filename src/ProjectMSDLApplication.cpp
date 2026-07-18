@@ -251,6 +251,12 @@ void ProjectMSDLApplication::defineOptions(Poco::Util::OptionSet& options)
     options.addOption(Option("presetWorkspace", "", "Writable directory used by the preset-development API.",
                              false, "<path>", true)
                           .binding("network.presetWorkspace", _commandLineOverrides));
+
+    options.addOption(Option("enableVisualPostProcessing", "",
+                             "Enable API-controlled mirror, rotation, and zoom post-processing.")
+                          .callback(
+                              OptionCallback<ProjectMSDLApplication>(
+                                  this, &ProjectMSDLApplication::EnableVisualPostProcessing)));
 }
 
 int ProjectMSDLApplication::main(POCO_UNUSED const std::vector<std::string>& args)
@@ -259,6 +265,13 @@ int ProjectMSDLApplication::main(POCO_UNUSED const std::vector<std::string>& arg
     renderLoop.Run();
 
     return EXIT_SUCCESS;
+}
+
+void ProjectMSDLApplication::EnableVisualPostProcessing(
+    POCO_UNUSED const std::string& name,
+    POCO_UNUSED const std::string& value)
+{
+    _commandLineOverrides->setBool("visual.postProcessingEnabled", true);
 }
 
 void ProjectMSDLApplication::DisplayHelp(POCO_UNUSED const std::string& name, POCO_UNUSED const std::string& value)

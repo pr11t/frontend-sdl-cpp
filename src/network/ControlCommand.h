@@ -1,5 +1,7 @@
 #pragma once
 
+#include "network/VisualState.h"
+
 #include <cstdint>
 #include <string>
 
@@ -9,7 +11,9 @@ enum class ControlCommandType
     PreviousPreset,
     LoadPresetFile,
     ReloadCurrentPreset,
-    LoadPresetSource
+    LoadPresetSource,
+    UpdateVisualState,
+    ResetVisualState
 };
 
 struct ControlCommand
@@ -18,4 +22,5 @@ struct ControlCommand
     bool smoothTransition{false};
     std::uint64_t jobId{0};
     std::string payload;
+    VisualStatePatch visualPatch;
 };

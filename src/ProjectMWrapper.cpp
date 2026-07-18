@@ -170,6 +170,11 @@ void ProjectMWrapper::RenderFrame() const
     projectm_opengl_render_frame(_projectM);
 }
 
+void ProjectMWrapper::RenderFrameToFramebuffer(std::uint32_t framebuffer) const
+{
+    projectm_opengl_render_frame_fbo(_projectM, framebuffer);
+}
+
 void ProjectMWrapper::DisplayInitialPreset()
 {
     if (!_projectMConfigView->getBool("enableSplash", true))

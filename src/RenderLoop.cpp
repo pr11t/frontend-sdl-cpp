@@ -33,6 +33,12 @@ void RenderLoop::Run()
     notificationCenter.addObserver(_quitNotificationObserver);
 
     _projectMWrapper.DisplayInitialPreset();
+    CheckViewportSize();
+    if (_networkControl.Visuals().Get().enabled &&
+        !_visualPostProcessor.Initialize(_renderWidth, _renderHeight))
+    {
+        _networkControl.Visuals().SetEnabled(false);
+    }
 
     while (!_wantsToQuit)
     {
@@ -43,7 +49,15 @@ void RenderLoop::Run()
         PollEvents();
         CheckViewportSize();
         _audioCapture.FillBuffer();
-        _projectMWrapper.RenderFrame();
+        if (_visualPostProcessor.Active())
+        {
+            _visualPostProcessor.Render(_projectMWrapper,
+                                        _networkControl.Visuals().Get());
+        }
+        else
+        {
+            _projectMWrapper.RenderFrame();
+        }
         _projectMGui.Draw();
 
         _sdlRenderingWindow.Swap();
@@ -55,6 +69,7 @@ void RenderLoop::Run()
     }
 
     notificationCenter.removeObserver(_quitNotificationObserver);
+    _visualPostProcessor.Shutdown();
 
     projectm_playlist_set_preset_switched_event_callback(_playlistHandle, nullptr, nullptr);
 }
@@ -106,6 +121,14 @@ void RenderLoop::DrainNetworkCommands()
                 _networkControl.Jobs().Complete(command.jobId, success, error);
                 continue;
             }
+
+            case ControlCommandType::UpdateVisualState:
+                _networkControl.Visuals().Apply(command.visualPatch);
+                continue;
+
+            case ControlCommandType::ResetVisualState:
+                _networkControl.Visuals().Reset();
+                continue;
         }
 
         Poco::NotificationCenter::defaultCenter().postNotification(
@@ -270,6 +293,12 @@ void RenderLoop::CheckViewportSize()
         _renderHeight = renderHeight;
 
         _projectMGui.UpdateFontSize();
+
+        if (_visualPostProcessor.Active() &&
+            !_visualPostProcessor.Resize(renderWidth, renderHeight))
+        {
+            _networkControl.Visuals().SetEnabled(false);
+        }
 
         poco_debug_f2(_logger, "Resized rendering canvas to %?dx%?d.", renderWidth, renderHeight);
     }

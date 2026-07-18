@@ -8,10 +8,11 @@
 #include <Poco/Timespan.h>
 
 HttpApiServer::HttpApiServer(ControlCommandQueue& commands, JobRegistry& jobs,
-                             PresetRepository& presets)
+                             PresetRepository& presets, VisualStateStore& visuals)
     : _commands(commands)
     , _jobs(jobs)
     , _presets(presets)
+    , _visuals(visuals)
 {
 }
 
@@ -39,7 +40,7 @@ void HttpApiServer::Start(const std::string& bindAddress, std::uint16_t port)
     parameters->setTimeout(Poco::Timespan(10, 0));
 
     _server = std::make_unique<Poco::Net::HTTPServer>(
-        new ApiRequestHandlerFactory(_commands, _jobs, _presets), socket, parameters);
+        new ApiRequestHandlerFactory(_commands, _jobs, _presets, _visuals), socket, parameters);
     _server->start();
 }
 

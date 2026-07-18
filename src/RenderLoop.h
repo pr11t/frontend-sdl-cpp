@@ -3,6 +3,7 @@
 #include "AudioCapture.h"
 #include "ProjectMWrapper.h"
 #include "SDLRenderingWindow.h"
+#include "VisualPostProcessor.h"
 
 #include "notifications/QuitNotification.h"
 #include "network/NetworkControlSubsystem.h"
@@ -82,6 +83,7 @@ protected:
     ProjectMWrapper& _projectMWrapper;
     SDLRenderingWindow& _sdlRenderingWindow;
     NetworkControlSubsystem& _networkControl;
+    VisualPostProcessor _visualPostProcessor;
 
     projectm_handle _projectMHandle{nullptr};
     projectm_playlist_handle _playlistHandle{nullptr};

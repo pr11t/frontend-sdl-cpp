@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <exception>
 #include <sstream>
 #include <string>
@@ -153,6 +154,19 @@ Poco::JSON::Object DocumentJson(const PresetDocument& preset, bool source)
     return result;
 }
 
+Poco::JSON::Object VisualJson(const VisualState& visual)
+{
+    Poco::JSON::Object result;
+    result.set("ok", true);
+    result.set("available", true);
+    result.set("enabled", visual.enabled);
+    result.set("mirrorX", visual.mirrorX);
+    result.set("mirrorY", visual.mirrorY);
+    result.set("rotationDegrees", visual.rotationDegrees);
+    result.set("zoom", visual.zoom);
+    return result;
+}
+
 void PresetErrorResponse(Poco::Net::HTTPServerResponse& response, const PresetError& error)
 {
     switch (error.Kind())
@@ -193,10 +207,11 @@ std::string QueryValue(const Poco::URI& uri, const std::string& key, const std::
 } // namespace
 
 ApiRequestHandler::ApiRequestHandler(ControlCommandQueue& commands, JobRegistry& jobs,
-                                     PresetRepository& presets)
+                                     PresetRepository& presets, VisualStateStore& visuals)
     : _commands(commands)
     , _jobs(jobs)
     , _presets(presets)
+    , _visuals(visuals)
 {
 }
 
@@ -220,6 +235,148 @@ void ApiRequestHandler::handleRequest(Poco::Net::HTTPServerRequest& request,
             body.set("service", "projectMSDL");
             body.set("apiVersion", 1);
             return WriteJson(response, Poco::Net::HTTPResponse::HTTP_OK, body);
+        }
+
+        if (path == "/api/v1/visual")
+        {
+            if (method == "GET")
+            {
+                return WriteJson(response, Poco::Net::HTTPResponse::HTTP_OK,
+                                 VisualJson(_visuals.Get()));
+            }
+            if (method != "PATCH")
+            {
+                return MethodNotAllowed(response, "GET, PATCH");
+            }
+            if (!_visuals.Get().enabled)
+            {
+                return WriteError(response, Poco::Net::HTTPResponse::HTTP_CONFLICT,
+                                  "visual_post_processing_disabled",
+                                  "Restart with --enableVisualPostProcessing to use visual controls.");
+            }
+
+            std::string body;
+            if (!ReadBody(request, response, controlBodyLimit, body))
+            {
+                return;
+            }
+            const auto object = ParseObject(body);
+            if (!Fields(object, {"mirrorX", "mirrorY", "rotationDegrees", "zoom"}, response))
+            {
+                return;
+            }
+            if (object->size() == 0)
+            {
+                return WriteError(response, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
+                                  "invalid_request", "At least one visual property is required.");
+            }
+
+            VisualStatePatch patch;
+            for (const auto& property : {std::string("mirrorX"), std::string("mirrorY")})
+            {
+                if (!object->has(property))
+                {
+                    continue;
+                }
+                const auto value = object->get(property);
+                if (!value.isBoolean())
+                {
+                    return WriteError(response, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
+                                      "invalid_request", property + " must be a boolean.");
+                }
+                if (property == "mirrorX")
+                {
+                    patch.properties |= VisualPropertyMirrorX;
+                    patch.mirrorX = value.convert<bool>();
+                }
+                else
+                {
+                    patch.properties |= VisualPropertyMirrorY;
+                    patch.mirrorY = value.convert<bool>();
+                }
+            }
+            if (object->has("rotationDegrees"))
+            {
+                const auto value = object->get("rotationDegrees");
+                if (!value.isNumeric())
+                {
+                    return WriteError(response, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
+                                      "invalid_request", "rotationDegrees must be a number.");
+                }
+                patch.rotationDegrees = value.convert<double>();
+                if (!std::isfinite(patch.rotationDegrees) ||
+                    patch.rotationDegrees < -360.0 || patch.rotationDegrees > 360.0)
+                {
+                    return WriteError(response, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
+                                      "invalid_request",
+                                      "rotationDegrees must be between -360 and 360.");
+                }
+                patch.properties |= VisualPropertyRotation;
+            }
+            if (object->has("zoom"))
+            {
+                const auto value = object->get("zoom");
+                if (!value.isNumeric())
+                {
+                    return WriteError(response, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
+                                      "invalid_request", "zoom must be a number.");
+                }
+                patch.zoom = value.convert<double>();
+                if (!std::isfinite(patch.zoom) || patch.zoom < 0.1 || patch.zoom > 10.0)
+                {
+                    return WriteError(response, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
+                                      "invalid_request", "zoom must be between 0.1 and 10.");
+                }
+                patch.properties |= VisualPropertyZoom;
+            }
+
+            ControlCommand command;
+            command.type = ControlCommandType::UpdateVisualState;
+            command.visualPatch = patch;
+            if (!_commands.TryEnqueue(command))
+            {
+                return WriteError(response, Poco::Net::HTTPResponse::HTTP_SERVICE_UNAVAILABLE,
+                                  "queue_full", "The remote-control command queue is full.");
+            }
+            Poco::JSON::Object result;
+            result.set("ok", true);
+            result.set("queued", true);
+            return WriteJson(response, Poco::Net::HTTPResponse::HTTP_ACCEPTED, result);
+        }
+
+        if (path == "/api/v1/visual/reset")
+        {
+            if (method != "POST")
+            {
+                return MethodNotAllowed(response, "POST");
+            }
+            if (!_visuals.Get().enabled)
+            {
+                return WriteError(response, Poco::Net::HTTPResponse::HTTP_CONFLICT,
+                                  "visual_post_processing_disabled",
+                                  "Restart with --enableVisualPostProcessing to use visual controls.");
+            }
+            std::string body;
+            if (!ReadBody(request, response, controlBodyLimit, body))
+            {
+                return;
+            }
+            const auto object = ParseObject(body);
+            if (!Fields(object, {}, response))
+            {
+                return;
+            }
+            ControlCommand command;
+            command.type = ControlCommandType::ResetVisualState;
+            if (!_commands.TryEnqueue(command))
+            {
+                return WriteError(response, Poco::Net::HTTPResponse::HTTP_SERVICE_UNAVAILABLE,
+                                  "queue_full", "The remote-control command queue is full.");
+            }
+            Poco::JSON::Object result;
+            result.set("ok", true);
+            result.set("queued", true);
+            return WriteJson(response, Poco::Net::HTTPResponse::HTTP_ACCEPTED, result);
         }
 
         if (path == "/api/v1/playback/next" || path == "/api/v1/playback/previous")
@@ -483,15 +640,17 @@ void ApiRequestHandler::handleRequest(Poco::Net::HTTPServerRequest& request,
 }
 
 ApiRequestHandlerFactory::ApiRequestHandlerFactory(ControlCommandQueue& commands, JobRegistry& jobs,
-                                                   PresetRepository& presets)
+                                                   PresetRepository& presets,
+                                                   VisualStateStore& visuals)
     : _commands(commands)
     , _jobs(jobs)
     , _presets(presets)
+    , _visuals(visuals)
 {
 }
 
 Poco::Net::HTTPRequestHandler* ApiRequestHandlerFactory::createRequestHandler(
     const Poco::Net::HTTPServerRequest&)
 {
-    return new ApiRequestHandler(_commands, _jobs, _presets);
+    return new ApiRequestHandler(_commands, _jobs, _presets, _visuals);
 }

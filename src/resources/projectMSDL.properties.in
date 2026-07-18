@@ -52,6 +52,13 @@ window.displayPresetNameInTitle = true
 # Useful if the automatically determined UI size is either to small or too large.
 window.uiScale = 1.0
 
+### Universal visual post-processing
+
+# Enable the off-screen post-processing renderer. This is normally enabled only
+# with the --enableVisualPostProcessing command-line flag. Mirror, rotation and
+# zoom are then controlled through the HTTP API.
+visual.postProcessingEnabled = false
+
 ### projectM settings
 
 # Default path where projectMSDL will search for presets and textures. The directory will be searched recursively.

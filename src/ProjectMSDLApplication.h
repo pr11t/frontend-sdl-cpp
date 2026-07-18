@@ -46,6 +46,7 @@ protected:
     void DisplayHelp(const std::string& name, const std::string& value);
 
     void ListAudioDevices(const std::string& name, const std::string& value);
+    void EnableVisualPostProcessing(const std::string& name, const std::string& value);
 
     Poco::AutoPtr<Poco::Util::PropertyFileConfiguration> _userConfiguration{
         new Poco::Util::PropertyFileConfiguration()}; //!< The current user's configuration, used to store/reset changes made in the UI's settings dialog.

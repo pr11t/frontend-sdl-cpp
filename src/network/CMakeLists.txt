@@ -10,6 +10,8 @@ add_library(ProjectMSDL-Network STATIC
         JobRegistry.h
         PresetRepository.cpp
         PresetRepository.h
+        VisualState.cpp
+        VisualState.h
         )
 
 target_include_directories(ProjectMSDL-Network

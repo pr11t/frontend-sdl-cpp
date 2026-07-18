@@ -19,6 +19,8 @@ add_executable(projectMSDL WIN32 MACOSX_BUNDLE
         RenderLoop.h
         SDLRenderingWindow.cpp
         SDLRenderingWindow.h
+        VisualPostProcessor.cpp
+        VisualPostProcessor.h
         network/NetworkControlSubsystem.cpp
         network/NetworkControlSubsystem.h
         main.cpp
@@ -66,8 +68,17 @@ else ()
             )
 endif ()
 
-# GLEW needs to be initialized if libprojectM depends on it (<v4.2).
-if (TARGET GLEW::glew OR TARGET GLEW::glew_s)
+# GLEW provides the modern desktop OpenGL entry points used by both the
+# post-processing renderer and older libprojectM versions.
+if (TARGET GLEW::GLEW)
+    set(PROJECTMSDL_GLEW_TARGET GLEW::GLEW)
+elseif (TARGET GLEW::glew)
+    set(PROJECTMSDL_GLEW_TARGET GLEW::glew)
+elseif (TARGET GLEW::glew_s)
+    set(PROJECTMSDL_GLEW_TARGET GLEW::glew_s)
+endif ()
+
+if (PROJECTMSDL_GLEW_TARGET)
     target_compile_definitions(projectMSDL
             PRIVATE
             USE_GLEW
@@ -90,6 +101,7 @@ target_link_libraries(projectMSDL
         ProjectMSDL-Notifications
         libprojectM::playlist
         Poco::Util
+        ${PROJECTMSDL_GLEW_TARGET}
         SDL2::SDL2$<$<STREQUAL:${SDL2_LINKAGE},static>:-static>
         SDL2::SDL2main
         OpenGL::$<IF:$<BOOL:${ENABLE_GLES}>,GLES3,GL>

@@ -2,6 +2,7 @@
 #include "network/HttpApiServer.h"
 #include "network/JobRegistry.h"
 #include "network/PresetRepository.h"
+#include "network/VisualState.h"
 
 #include <Poco/File.h>
 #include <Poco/FileStream.h>
@@ -84,7 +85,8 @@ void RunTests()
         output << "[preset00]\n";
     }
     PresetRepository presets(workspace, {bundled}, 1024 * 1024);
-    HttpApiServer server(queue, jobs, presets);
+    VisualStateStore visuals;
+    HttpApiServer server(queue, jobs, presets, visuals);
     server.Start("127.0.0.1", 0);
     Require(server.Running(), "Server should be running.");
     Require(server.Port() != 0, "Ephemeral server port should be assigned.");
@@ -93,6 +95,57 @@ void RunTests()
     Require(health.status == Poco::Net::HTTPResponse::HTTP_OK, "Health should return 200.");
     Require(health.body->getValue<bool>("ok"), "Health response should be successful.");
     Require(health.body->getValue<int>("apiVersion") == 1, "Health API version should be 1.");
+
+    auto visualDisabled = Request(server.Port(), "GET", "/api/v1/visual");
+    Require(visualDisabled.status == Poco::Net::HTTPResponse::HTTP_OK,
+            "Visual state should be readable when post-processing is disabled.");
+    Require(!visualDisabled.body->getValue<bool>("enabled"),
+            "Visual state should report post-processing as disabled.");
+
+    auto disabledPatch = Request(server.Port(), "PATCH", "/api/v1/visual",
+                                 R"({"mirrorX":true})");
+    Require(disabledPatch.status == Poco::Net::HTTPResponse::HTTP_CONFLICT,
+            "Visual updates should be rejected when post-processing is disabled.");
+
+    visuals.SetEnabled(true);
+    auto visualPatch = Request(
+        server.Port(), "PATCH", "/api/v1/visual",
+        R"({"mirrorX":true,"rotationDegrees":90,"zoom":1.25})");
+    Require(visualPatch.status == Poco::Net::HTTPResponse::HTTP_ACCEPTED,
+            "A valid visual update should return 202.");
+    ControlCommand visualCommand{};
+    Require(queue.TryDequeue(visualCommand), "Visual update should be queued.");
+    Require(visualCommand.type == ControlCommandType::UpdateVisualState,
+            "Visual endpoint should queue a visual update.");
+    Require((visualCommand.visualPatch.properties & VisualPropertyMirrorX) != 0U,
+            "Visual update should include mirrorX.");
+    Require((visualCommand.visualPatch.properties & VisualPropertyRotation) != 0U,
+            "Visual update should include rotation.");
+    Require((visualCommand.visualPatch.properties & VisualPropertyZoom) != 0U,
+            "Visual update should include zoom.");
+    visuals.Apply(visualCommand.visualPatch);
+
+    auto visualState = Request(server.Port(), "GET", "/api/v1/visual");
+    Require(visualState.body->getValue<bool>("mirrorX"),
+            "Applied mirrorX should be observable.");
+    Require(visualState.body->getValue<double>("rotationDegrees") == 90.0,
+            "Applied rotation should be observable.");
+    Require(visualState.body->getValue<double>("zoom") == 1.25,
+            "Applied zoom should be observable.");
+
+    auto invalidVisual = Request(server.Port(), "PATCH", "/api/v1/visual",
+                                 R"({"zoom":0})");
+    Require(invalidVisual.status == Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
+            "Out-of-range visual values should return 400.");
+
+    auto resetVisual = Request(server.Port(), "POST", "/api/v1/visual/reset", "{}");
+    Require(resetVisual.status == Poco::Net::HTTPResponse::HTTP_ACCEPTED,
+            "Visual reset should return 202.");
+    ControlCommand resetCommand{};
+    Require(queue.TryDequeue(resetCommand), "Visual reset should be queued.");
+    Require(resetCommand.type == ControlCommandType::ResetVisualState,
+            "Visual reset should queue the correct command.");
+    visuals.Reset();
 
     auto next = Request(server.Port(), "POST", "/api/v1/playback/next", "{}");
     Require(next.status == Poco::Net::HTTPResponse::HTTP_ACCEPTED, "Next should return 202.");
