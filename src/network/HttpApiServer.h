@@ -1,5 +1,6 @@
 #pragma once
 
+#include "network/ConfigLayers.h"
 #include "network/ControlCommandQueue.h"
 #include "network/JobRegistry.h"
 #include "network/PlaybackState.h"
@@ -17,7 +18,7 @@ class HttpApiServer
 public:
     HttpApiServer(ControlCommandQueue& commands, JobRegistry& jobs,
                   PresetRepository& presets, VisualStateStore& visuals,
-                  PlaybackStateStore& playback);
+                  PlaybackStateStore& playback, ConfigLayers configLayers);
     ~HttpApiServer();
 
     void Start(const std::string& bindAddress, std::uint16_t port);
@@ -32,6 +33,7 @@ private:
     PresetRepository& _presets;
     VisualStateStore& _visuals;
     PlaybackStateStore& _playback;
+    ConfigLayers _configLayers;
     std::unique_ptr<Poco::Net::HTTPServer> _server;
     std::uint16_t _port{0};
 };

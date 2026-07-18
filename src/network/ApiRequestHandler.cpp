@@ -204,16 +204,134 @@ std::string QueryValue(const Poco::URI& uri, const std::string& key, const std::
     return fallback;
 }
 
+// ---------------------------------------------------------------------------
+// Live-settable configuration registry.
+//
+// Single source of truth for the HTTP config API: it drives validation, the
+// schema endpoint, and reading of effective values. Every key here is applied
+// live by ProjectMWrapper's configuration-change observer.
+// ---------------------------------------------------------------------------
+
+enum class ConfigType
+{
+    Bool,
+    Int,
+    Double
+};
+
+struct ConfigOption
+{
+    const char* name;        //!< API field name, e.g. "displayDuration".
+    const char* key;         //!< Full config key, e.g. "projectM.displayDuration".
+    ConfigType type;
+    double min;              //!< Inclusive lower bound (numeric types only).
+    double max;              //!< Inclusive upper bound (numeric types only).
+    double defaultValue;     //!< Fallback if the key is set in no layer (bool: 0/1).
+    const char* description;
+};
+
+const std::vector<ConfigOption>& ConfigOptions()
+{
+    static const std::vector<ConfigOption> options = {
+        {"displayDuration", "projectM.displayDuration", ConfigType::Double, 0.0, 86400.0, 30.0,
+         "Seconds each preset is shown before auto-advancing. 0 disables auto-advance."},
+        {"shuffleEnabled", "projectM.shuffleEnabled", ConfigType::Bool, 0.0, 0.0, 1.0,
+         "Pick the next preset at random when auto-advancing."},
+        {"presetLocked", "projectM.presetLocked", ConfigType::Bool, 0.0, 0.0, 0.0,
+         "Lock the current preset so the playlist stops advancing."},
+        {"transitionDuration", "projectM.transitionDuration", ConfigType::Double, 0.0, 60.0, 3.0,
+         "Soft-cut blend duration in seconds."},
+        {"hardCutsEnabled", "projectM.hardCutsEnabled", ConfigType::Bool, 0.0, 0.0, 0.0,
+         "Enable beat-triggered hard cuts to the next preset."},
+        {"hardCutDuration", "projectM.hardCutDuration", ConfigType::Double, 0.0, 86400.0, 20.0,
+         "Minimum seconds between hard cuts."},
+        {"hardCutSensitivity", "projectM.hardCutSensitivity", ConfigType::Double, 0.0, 5.0, 1.0,
+         "Beat sensitivity for hard cuts (0-5)."},
+        {"beatSensitivity", "projectM.beatSensitivity", ConfigType::Double, 0.0, 2.0, 1.0,
+         "Overall beat detection sensitivity (0-2)."},
+        {"aspectCorrectionEnabled", "projectM.aspectCorrectionEnabled", ConfigType::Bool, 0.0, 0.0, 1.0,
+         "Correct preset aspect ratio to the window."},
+        {"meshX", "projectM.meshX", ConfigType::Int, 1.0, 512.0, 96.0,
+         "Per-pixel mesh width."},
+        {"meshY", "projectM.meshY", ConfigType::Int, 1.0, 512.0, 54.0,
+         "Per-pixel mesh height."},
+        {"fps", "projectM.fps", ConfigType::Int, 1.0, 1000.0, 60.0,
+         "Target FPS used for projectM timing. The window frame limiter may need a restart."},
+    };
+    return options;
+}
+
+const ConfigOption* FindConfigOption(const std::string& name)
+{
+    for (const auto& option : ConfigOptions())
+    {
+        if (name == option.name)
+        {
+            return &option;
+        }
+    }
+    return nullptr;
+}
+
+std::string ConfigTypeName(ConfigType type)
+{
+    switch (type)
+    {
+        case ConfigType::Bool:
+            return "boolean";
+        case ConfigType::Int:
+            return "integer";
+        case ConfigType::Double:
+            return "number";
+    }
+    return "string";
+}
+
+// Which layer currently supplies the effective value, in precedence order.
+std::string ConfigSource(const ConfigLayers& layers, const std::string& key)
+{
+    if (layers.runtime && layers.runtime->hasProperty(key))
+    {
+        return "runtime";
+    }
+    if (layers.commandLine && layers.commandLine->hasProperty(key))
+    {
+        return "commandLine";
+    }
+    if (layers.user && layers.user->hasProperty(key))
+    {
+        return "user";
+    }
+    return "default";
+}
+
+// Reads the current effective value as a typed JSON value.
+Poco::Dynamic::Var ConfigEffectiveValue(const ConfigLayers& layers, const ConfigOption& option)
+{
+    const auto& config = *layers.effective;
+    switch (option.type)
+    {
+        case ConfigType::Bool:
+            return config.getBool(option.key, option.defaultValue != 0.0);
+        case ConfigType::Int:
+            return config.getInt(option.key, static_cast<int>(option.defaultValue));
+        case ConfigType::Double:
+            return config.getDouble(option.key, option.defaultValue);
+    }
+    return {};
+}
+
 } // namespace
 
 ApiRequestHandler::ApiRequestHandler(ControlCommandQueue& commands, JobRegistry& jobs,
                                      PresetRepository& presets, VisualStateStore& visuals,
-                                     PlaybackStateStore& playback)
+                                     PlaybackStateStore& playback, ConfigLayers configLayers)
     : _commands(commands)
     , _jobs(jobs)
     , _presets(presets)
     , _visuals(visuals)
     , _playback(playback)
+    , _configLayers(std::move(configLayers))
 {
 }
 
@@ -237,6 +355,205 @@ void ApiRequestHandler::handleRequest(Poco::Net::HTTPServerRequest& request,
             body.set("service", "projectMSDL");
             body.set("apiVersion", 1);
             return WriteJson(response, Poco::Net::HTTPResponse::HTTP_OK, body);
+        }
+
+        if (path == "/api/v1/config/schema")
+        {
+            if (method != "GET")
+            {
+                return MethodNotAllowed(response, "GET");
+            }
+            Poco::JSON::Array options;
+            for (const auto& option : ConfigOptions())
+            {
+                Poco::JSON::Object item;
+                item.set("name", option.name);
+                item.set("key", option.key);
+                item.set("type", ConfigTypeName(option.type));
+                if (option.type != ConfigType::Bool)
+                {
+                    item.set("min", option.min);
+                    item.set("max", option.max);
+                }
+                item.set("description", option.description);
+                options.add(item);
+            }
+            Poco::JSON::Object body;
+            body.set("ok", true);
+            body.set("options", options);
+            return WriteJson(response, Poco::Net::HTTPResponse::HTTP_OK, body);
+        }
+
+        if (path == "/api/v1/config")
+        {
+            if (method == "GET")
+            {
+                Poco::JSON::Object config;
+                for (const auto& option : ConfigOptions())
+                {
+                    Poco::JSON::Object entry;
+                    entry.set("value", ConfigEffectiveValue(_configLayers, option));
+                    entry.set("source", ConfigSource(_configLayers, option.key));
+                    config.set(option.name, entry);
+                }
+                Poco::JSON::Object body;
+                body.set("ok", true);
+                body.set("config", config);
+                return WriteJson(response, Poco::Net::HTTPResponse::HTTP_OK, body);
+            }
+            if (method == "DELETE")
+            {
+                // Clear every runtime override, handing control back to the
+                // command-line / user / default layers.
+                int cleared = 0;
+                for (const auto& option : ConfigOptions())
+                {
+                    if (!_configLayers.runtime->hasProperty(option.key))
+                    {
+                        continue;
+                    }
+                    ControlCommand command;
+                    command.type = ControlCommandType::ClearConfig;
+                    command.configKey = option.key;
+                    if (!_commands.TryEnqueue(command))
+                    {
+                        return WriteError(response, Poco::Net::HTTPResponse::HTTP_SERVICE_UNAVAILABLE,
+                                          "queue_full", "The remote-control command queue is full.");
+                    }
+                    ++cleared;
+                }
+                Poco::JSON::Object result;
+                result.set("ok", true);
+                result.set("queued", true);
+                result.set("cleared", cleared);
+                return WriteJson(response, Poco::Net::HTTPResponse::HTTP_ACCEPTED, result);
+            }
+            if (method != "PATCH")
+            {
+                return MethodNotAllowed(response, "GET, PATCH, DELETE");
+            }
+
+            std::string requestBody;
+            if (!ReadBody(request, response, controlBodyLimit, requestBody))
+            {
+                return;
+            }
+            const auto object = ParseObject(requestBody);
+            if (object->size() == 0)
+            {
+                return WriteError(response, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
+                                  "invalid_request", "At least one setting is required.");
+            }
+
+            // Validate every field up-front so an invalid setting rejects the whole
+            // request instead of applying a partial, ambiguous update.
+            struct PendingSet
+            {
+                std::string key;
+                std::string value;
+            };
+            std::vector<PendingSet> pending;
+            for (const auto& name : object->getNames())
+            {
+                const auto* option = FindConfigOption(name);
+                if (option == nullptr)
+                {
+                    return WriteError(response, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
+                                      "invalid_request", "Unknown setting: " + name);
+                }
+                const auto value = object->get(name);
+                std::string normalized;
+                if (option->type == ConfigType::Bool)
+                {
+                    if (!value.isBoolean())
+                    {
+                        return WriteError(response, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
+                                          "invalid_request",
+                                          std::string(option->name) + " must be a boolean.");
+                    }
+                    normalized = value.convert<bool>() ? "true" : "false";
+                }
+                else
+                {
+                    if (!value.isNumeric())
+                    {
+                        return WriteError(response, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
+                                          "invalid_request",
+                                          std::string(option->name) + " must be a number.");
+                    }
+                    const double number = value.convert<double>();
+                    if (!std::isfinite(number) || number < option->min || number > option->max)
+                    {
+                        std::ostringstream message;
+                        message << option->name << " must be between " << option->min
+                                << " and " << option->max << ".";
+                        return WriteError(response, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
+                                          "invalid_request", message.str());
+                    }
+                    if (option->type == ConfigType::Int)
+                    {
+                        normalized = std::to_string(static_cast<long long>(std::llround(number)));
+                    }
+                    else
+                    {
+                        std::ostringstream numberText;
+                        numberText << number;
+                        normalized = numberText.str();
+                    }
+                }
+                pending.push_back({option->key, normalized});
+            }
+
+            for (const auto& item : pending)
+            {
+                ControlCommand command;
+                command.type = ControlCommandType::SetConfig;
+                command.configKey = item.key;
+                command.configValue = item.value;
+                if (!_commands.TryEnqueue(command))
+                {
+                    return WriteError(response, Poco::Net::HTTPResponse::HTTP_SERVICE_UNAVAILABLE,
+                                      "queue_full", "The remote-control command queue is full.");
+                }
+            }
+
+            Poco::JSON::Object result;
+            result.set("ok", true);
+            result.set("queued", true);
+            result.set("updated", static_cast<int>(pending.size()));
+            return WriteJson(response, Poco::Net::HTTPResponse::HTTP_ACCEPTED, result);
+        }
+
+        {
+            const std::string configPrefix = "/api/v1/config/";
+            if (path.compare(0, configPrefix.size(), configPrefix) == 0)
+            {
+                // Clear a single runtime override (schema is handled above).
+                if (method != "DELETE")
+                {
+                    return MethodNotAllowed(response, "DELETE");
+                }
+                const auto name = path.substr(configPrefix.size());
+                const auto* option = FindConfigOption(name);
+                if (option == nullptr)
+                {
+                    return WriteError(response, Poco::Net::HTTPResponse::HTTP_NOT_FOUND,
+                                      "not_found", "Unknown setting: " + name);
+                }
+                ControlCommand command;
+                command.type = ControlCommandType::ClearConfig;
+                command.configKey = option->key;
+                if (!_commands.TryEnqueue(command))
+                {
+                    return WriteError(response, Poco::Net::HTTPResponse::HTTP_SERVICE_UNAVAILABLE,
+                                      "queue_full", "The remote-control command queue is full.");
+                }
+                Poco::JSON::Object result;
+                result.set("ok", true);
+                result.set("queued", true);
+                result.set("cleared", option->name);
+                return WriteJson(response, Poco::Net::HTTPResponse::HTTP_ACCEPTED, result);
+            }
         }
 
         if (path == "/api/v1/visual")
@@ -670,12 +987,14 @@ void ApiRequestHandler::handleRequest(Poco::Net::HTTPServerRequest& request,
 ApiRequestHandlerFactory::ApiRequestHandlerFactory(ControlCommandQueue& commands, JobRegistry& jobs,
                                                    PresetRepository& presets,
                                                    VisualStateStore& visuals,
-                                                   PlaybackStateStore& playback)
+                                                   PlaybackStateStore& playback,
+                                                   ConfigLayers configLayers)
     : _commands(commands)
     , _jobs(jobs)
     , _presets(presets)
     , _visuals(visuals)
     , _playback(playback)
+    , _configLayers(std::move(configLayers))
 {
 }
 
@@ -683,5 +1002,5 @@ Poco::Net::HTTPRequestHandler* ApiRequestHandlerFactory::createRequestHandler(
     const Poco::Net::HTTPServerRequest&)
 {
     return new ApiRequestHandler(_commands, _jobs, _presets, _visuals,
-                                 _playback);
+                                 _playback, _configLayers);
 }

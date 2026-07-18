@@ -1,5 +1,8 @@
 #include "network/NetworkControlSubsystem.h"
 
+#include "ProjectMSDLApplication.h"
+#include "network/ConfigLayers.h"
+
 #include <Poco/Exception.h>
 #include <Poco/Util/AbstractConfiguration.h>
 #include <Poco/Util/Application.h>
@@ -84,8 +87,16 @@ void NetworkControlSubsystem::initialize(Poco::Util::Application& app)
         const auto maxPresetBytes = app.config().getUInt64("network.maxPresetBytes", 1048576);
         _presets = std::make_unique<PresetRepository>(
             workspace, bundledRoots, static_cast<std::size_t>(maxPresetBytes));
+
+        auto& projectMSDLApp = dynamic_cast<ProjectMSDLApplication&>(app);
+        ConfigLayers configLayers;
+        configLayers.effective = Poco::Util::AbstractConfiguration::Ptr(&app.config(), true);
+        configLayers.runtime = projectMSDLApp.RuntimeConfiguration();
+        configLayers.commandLine = projectMSDLApp.CommandLineConfiguration();
+        configLayers.user = projectMSDLApp.UserConfiguration();
+
         _server = std::make_unique<HttpApiServer>(_commands, _jobs, *_presets,
-                                                  _visuals, _playback);
+                                                  _visuals, _playback, configLayers);
         _server->Start(bindAddress, static_cast<std::uint16_t>(configuredPort));
         poco_information_f2(_logger, "Unauthenticated HTTP remote-control API listening on %s:%?d.",
                             bindAddress, configuredPort);

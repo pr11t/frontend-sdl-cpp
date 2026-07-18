@@ -3,7 +3,7 @@
 > [!NOTE]
 > This is a personal vibe coded fork of
 > [projectM-visualizer/frontend-sdl-cpp](https://github.com/projectM-visualizer/frontend-sdl-cpp).
-> It adds a network-control API, live preset-development endpoints, and optional visual post-processing.
+> It adds a network-control API, live preset-development endpoints, runtime configuration control, and optional visual post-processing.
 > It is not intended for upstream contribution, and comes with no support.
 
 This is a reference implementation of an application that makes use of the projectM music visualization library.

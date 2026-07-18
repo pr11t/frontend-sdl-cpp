@@ -50,10 +50,18 @@ Poco::AutoPtr<Poco::Util::MapConfiguration> ProjectMSDLApplication::CommandLineC
     return _commandLineOverrides;
 }
 
+Poco::AutoPtr<Poco::Util::MapConfiguration> ProjectMSDLApplication::RuntimeConfiguration()
+{
+    return _runtimeOverrides;
+}
+
 void ProjectMSDLApplication::initialize(Poco::Util::Application& self)
 {
-    // Application settings are PRIO_APPLICATION, higher values have lower precedence.
-    // So we put command-line overrides just below settings changed in the UI.
+    // Poco layered config: lower priority values have precedence. Runtime overrides
+    // (written via the HTTP config API) sit above everything, then command-line
+    // overrides, then the UI/user config (added further below), then the defaults.
+    _runtimeOverrides->enableEvents(true);
+    config().addWriteable(_runtimeOverrides, PRIO_APPLICATION - 10);
     config().add(_commandLineOverrides, PRIO_APPLICATION + 10);
 
     std::string configFileName = config().getString("application.baseName") + ".properties";

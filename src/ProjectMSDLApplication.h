@@ -29,6 +29,16 @@ public:
      */
     Poco::AutoPtr<Poco::Util::MapConfiguration> CommandLineConfiguration();
 
+    /**
+     * @brief Returns the runtime override map.
+     *
+     * This layer is added at the highest precedence (above command-line and user
+     * configuration), so values written here (e.g. via the HTTP config API) take
+     * effect immediately and win over everything else, including launch flags.
+     * @return The map configuration which stores runtime overrides.
+     */
+    Poco::AutoPtr<Poco::Util::MapConfiguration> RuntimeConfiguration();
+
 protected:
     void initialize(Application& self) override;
 
@@ -52,4 +62,6 @@ protected:
         new Poco::Util::PropertyFileConfiguration()}; //!< The current user's configuration, used to store/reset changes made in the UI's settings dialog.
     Poco::AutoPtr<Poco::Util::MapConfiguration> _commandLineOverrides{
         new Poco::Util::MapConfiguration()}; //!< Map configuration with overrides set by command line arguments.
+    Poco::AutoPtr<Poco::Util::MapConfiguration> _runtimeOverrides{
+        new Poco::Util::MapConfiguration()}; //!< Highest-precedence layer for runtime overrides set via the HTTP config API.
 };

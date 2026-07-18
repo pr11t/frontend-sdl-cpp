@@ -14,7 +14,9 @@ enum class ControlCommandType
     ReloadCurrentPreset,
     LoadPresetSource,
     UpdateVisualState,
-    ResetVisualState
+    ResetVisualState,
+    SetConfig,
+    ClearConfig
 };
 
 struct ControlCommand
@@ -24,4 +26,6 @@ struct ControlCommand
     std::uint64_t jobId{0};
     std::string payload;
     VisualStatePatch visualPatch;
+    std::string configKey;   //!< Full config key for SetConfig, e.g. "projectM.displayDuration".
+    std::string configValue; //!< Canonical string value for SetConfig, applied on the render thread.
 };

@@ -87,6 +87,27 @@ public:
     bool ReloadCurrentPreset(bool smoothTransition, std::string& error);
     const std::string& CurrentPresetFile() const;
 
+    /**
+     * @brief Writes a runtime configuration override and applies it live.
+     *
+     * Must be called on the render thread (it ends up calling projectM setters).
+     * The value is stored in the highest-precedence runtime override layer, so it
+     * wins over command-line and user configuration, then the change observer maps
+     * the key to the matching projectM setter.
+     * @param key Full config key, e.g. "projectM.displayDuration".
+     * @param value Canonical string value (e.g. "true", "30").
+     */
+    void SetRuntimeConfig(const std::string& key, const std::string& value);
+
+    /**
+     * @brief Removes a runtime configuration override and re-applies the value
+     * from the next layer down (command-line, user or default).
+     *
+     * Must be called on the render thread (see SetRuntimeConfig).
+     * @param key Full config key, e.g. "projectM.displayDuration".
+     */
+    void ClearRuntimeConfig(const std::string& key);
+
 private:
     /**
      * @brief projectM callback. Called whenever a preset is switched.
@@ -113,7 +134,8 @@ private:
      */
     void OnConfigurationPropertyRemoved(const std::string& key);
 
-    Poco::AutoPtr<Poco::Util::AbstractConfiguration> _userConfig; //!< View of the "projectM" configuration subkey in the "user" configuration.
+    Poco::AutoPtr<Poco::Util::AbstractConfiguration> _userConfig; //!< The "user" configuration layer (settings changed in the UI).
+    Poco::AutoPtr<Poco::Util::AbstractConfiguration> _runtimeConfig; //!< The highest-precedence runtime override layer (HTTP config API).
     Poco::AutoPtr<Poco::Util::AbstractConfiguration> _projectMConfigView; //!< View of the "projectM" configuration subkey in the "effective" configuration.
 
     projectm_handle _projectM{nullptr}; //!< Pointer to the projectM instance used by the application.

@@ -23,6 +23,7 @@ void ProjectMWrapper::initialize(Poco::Util::Application& app)
     auto& projectMSDLApp = dynamic_cast<ProjectMSDLApplication&>(app);
     _projectMConfigView = projectMSDLApp.config().createView("projectM");
     _userConfig = projectMSDLApp.UserConfiguration();
+    _runtimeConfig = projectMSDLApp.RuntimeConfiguration();
     poco_information_f1(_logger, "Events enabled: %?d", _projectMConfigView->eventsEnabled());
 
     if (!_projectM)
@@ -112,10 +113,17 @@ void ProjectMWrapper::initialize(Poco::Util::Application& app)
     // Observe user configuration changes (set via the settings window)
     _userConfig->propertyChanged += Poco::delegate(this, &ProjectMWrapper::OnConfigurationPropertyChanged);
     _userConfig->propertyRemoved += Poco::delegate(this, &ProjectMWrapper::OnConfigurationPropertyRemoved);
+
+    // Observe runtime overrides (set via the HTTP config API). Both layers deliver
+    // full "projectM." keys and are applied by re-reading the effective config view.
+    _runtimeConfig->propertyChanged += Poco::delegate(this, &ProjectMWrapper::OnConfigurationPropertyChanged);
+    _runtimeConfig->propertyRemoved += Poco::delegate(this, &ProjectMWrapper::OnConfigurationPropertyRemoved);
 }
 
 void ProjectMWrapper::uninitialize()
 {
+    _runtimeConfig->propertyRemoved -= Poco::delegate(this, &ProjectMWrapper::OnConfigurationPropertyRemoved);
+    _runtimeConfig->propertyChanged -= Poco::delegate(this, &ProjectMWrapper::OnConfigurationPropertyChanged);
     _userConfig->propertyRemoved -= Poco::delegate(this, &ProjectMWrapper::OnConfigurationPropertyRemoved);
     _userConfig->propertyChanged -= Poco::delegate(this, &ProjectMWrapper::OnConfigurationPropertyChanged);
     Poco::NotificationCenter::defaultCenter().removeObserver(_playbackControlNotificationObserver);
@@ -399,7 +407,7 @@ void ProjectMWrapper::OnConfigurationPropertyRemoved(const std::string& key)
 
     if (key == "projectM.hardCutsEnabled")
     {
-        projectm_set_aspect_correction(_projectM, _projectMConfigView->getBool("hardCutsEnabled", false));
+        projectm_set_hard_cut_enabled(_projectM, _projectMConfigView->getBool("hardCutsEnabled", false));
     }
 
     if (key == "projectM.hardCutDuration")
@@ -412,8 +420,42 @@ void ProjectMWrapper::OnConfigurationPropertyRemoved(const std::string& key)
         projectm_set_hard_cut_sensitivity(_projectM, static_cast<float>(_projectMConfigView->getDouble("hardCutSensitivity", 1.0)));
     }
 
+    if (key == "projectM.beatSensitivity")
+    {
+        projectm_set_beat_sensitivity(_projectM, static_cast<float>(_projectMConfigView->getDouble("beatSensitivity", 1.0)));
+    }
+
+    if (key == "projectM.fps")
+    {
+        int fps = _projectMConfigView->getInt("fps", 60);
+        if (fps <= 0)
+        {
+            fps = 60;
+        }
+        projectm_set_fps(_projectM, fps);
+    }
+
     if (key == "projectM.meshX" || key == "projectM.meshY")
     {
         projectm_set_mesh_size(_projectM, _projectMConfigView->getUInt64("meshX", 48), _projectMConfigView->getUInt64("meshY", 32));
+    }
+}
+
+void ProjectMWrapper::SetRuntimeConfig(const std::string& key, const std::string& value)
+{
+    // Writing the highest-precedence runtime layer fires the change observer above,
+    // which re-reads the effective config view and applies the matching projectM
+    // setter. Must run on the render thread (guaranteed by the control command queue).
+    _runtimeConfig->setString(key, value);
+}
+
+void ProjectMWrapper::ClearRuntimeConfig(const std::string& key)
+{
+    // Removing the key fires propertyRemoved, which re-reads the effective config
+    // view (now without the runtime override) and re-applies the value from the
+    // next layer down. Must run on the render thread (see SetRuntimeConfig).
+    if (_runtimeConfig->hasProperty(key))
+    {
+        _runtimeConfig->remove(key);
     }
 }

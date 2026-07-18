@@ -1,6 +1,7 @@
 add_library(ProjectMSDL-Network STATIC
         ApiRequestHandler.cpp
         ApiRequestHandler.h
+        ConfigLayers.h
         ControlCommand.h
         ControlCommandQueue.cpp
         ControlCommandQueue.h

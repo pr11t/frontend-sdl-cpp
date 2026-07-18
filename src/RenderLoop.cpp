@@ -137,6 +137,14 @@ void RenderLoop::DrainNetworkCommands()
             case ControlCommandType::ResetVisualState:
                 _networkControl.Visuals().Reset();
                 continue;
+
+            case ControlCommandType::SetConfig:
+                _projectMWrapper.SetRuntimeConfig(command.configKey, command.configValue);
+                continue;
+
+            case ControlCommandType::ClearConfig:
+                _projectMWrapper.ClearRuntimeConfig(command.configKey);
+                continue;
         }
 
         Poco::NotificationCenter::defaultCenter().postNotification(

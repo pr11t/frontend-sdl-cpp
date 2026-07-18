@@ -404,3 +404,155 @@ Content-Type: application/json
 ```
 
 Reset disables both mirrors and restores rotation `0` and zoom `1`.
+
+## Configuration
+
+Live projectM settings (preset duration, shuffle, transitions, hard cuts,
+sensitivities, mesh size, FPS) can be read and changed at runtime.
+
+Changes are written to a dedicated runtime override layer that has **higher
+precedence than command-line flags and the user configuration**. A value set
+through this API therefore takes effect immediately and wins over everything,
+including launch flags. Overrides are held in memory only and are not persisted
+to the user configuration file; clear them to hand control back to the lower
+layers. Updates are queued and applied on the render thread.
+
+### Settings
+
+| Name | Type and range | Description |
+| --- | --- | --- |
+| `displayDuration` | Number `0`–`86400` | Seconds each preset is shown before auto-advancing. `0` disables auto-advance. |
+| `shuffleEnabled` | Boolean | Pick the next preset at random when auto-advancing. |
+| `presetLocked` | Boolean | Lock the current preset so the playlist stops advancing. |
+| `transitionDuration` | Number `0`–`60` | Soft-cut blend duration in seconds. |
+| `hardCutsEnabled` | Boolean | Enable beat-triggered hard cuts to the next preset. |
+| `hardCutDuration` | Number `0`–`86400` | Minimum seconds between hard cuts. |
+| `hardCutSensitivity` | Number `0`–`5` | Beat sensitivity for hard cuts. |
+| `beatSensitivity` | Number `0`–`2` | Overall beat detection sensitivity. |
+| `aspectCorrectionEnabled` | Boolean | Correct preset aspect ratio to the window. |
+| `meshX` | Integer `1`–`512` | Per-pixel mesh width. |
+| `meshY` | Integer `1`–`512` | Per-pixel mesh height. |
+| `fps` | Integer `1`–`1000` | Target FPS used for projectM timing. The window frame limiter may still require a restart. |
+
+### Read the schema
+
+```http
+GET /api/v1/config/schema
+```
+
+Returns the settable options with their type, range, and description:
+
+```json
+{
+  "ok": true,
+  "options": [
+    {
+      "name": "displayDuration",
+      "key": "projectM.displayDuration",
+      "type": "number",
+      "min": 0,
+      "max": 86400,
+      "description": "Seconds each preset is shown before auto-advancing. 0 disables auto-advance."
+    }
+  ]
+}
+```
+
+### Read current values
+
+```http
+GET /api/v1/config
+```
+
+Each setting reports its effective value and the layer it comes from
+(`runtime`, `commandLine`, `user`, or `default`):
+
+```json
+{
+  "ok": true,
+  "config": {
+    "displayDuration": { "value": 30, "source": "default" },
+    "shuffleEnabled": { "value": false, "source": "runtime" }
+  }
+}
+```
+
+```sh
+curl -s http://127.0.0.1:8080/api/v1/config
+```
+
+### Update settings
+
+```http
+PATCH /api/v1/config
+Content-Type: application/json
+```
+
+Provide one or more settings. The request is atomic: if any field is unknown,
+the wrong type, or out of range, the whole request is rejected with
+`400 Bad Request` and nothing is applied.
+
+```json
+{
+  "displayDuration": 0,
+  "shuffleEnabled": false,
+  "presetLocked": true
+}
+```
+
+```sh
+curl -s -X PATCH \
+  -H 'Content-Type: application/json' \
+  -d '{"displayDuration":0,"shuffleEnabled":false}' \
+  http://127.0.0.1:8080/api/v1/config
+```
+
+A successful request returns `202 Accepted` with the number of settings queued:
+
+```json
+{
+  "ok": true,
+  "queued": true,
+  "updated": 2
+}
+```
+
+To pin the current preset indefinitely, disable auto-advance and lock it:
+
+```sh
+curl -s -X PATCH \
+  -H 'Content-Type: application/json' \
+  -d '{"displayDuration":0,"presetLocked":true}' \
+  http://127.0.0.1:8080/api/v1/config
+```
+
+### Clear overrides
+
+Removing an override reverts the setting to the next layer down (command-line,
+user, or default value).
+
+Clear a single setting:
+
+```http
+DELETE /api/v1/config/{name}
+```
+
+```sh
+curl -s -X DELETE http://127.0.0.1:8080/api/v1/config/shuffleEnabled
+```
+
+An unknown setting name returns `404 Not Found`.
+
+Clear every override at once:
+
+```http
+DELETE /api/v1/config
+```
+
+```json
+{
+  "ok": true,
+  "queued": true,
+  "cleared": 2
+}
+```
