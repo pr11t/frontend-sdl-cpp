@@ -102,12 +102,19 @@ Returns the active preset's file name without exposing its filesystem path:
 {
   "ok": true,
   "name": "Artist - Example.milk",
+  "id": "bundled/pack/Artist - Example.milk",
   "fileBacked": true
 }
 ```
 
-`name` is empty and `fileBacked` is `false` before a preset is active or when
-the current preset was loaded from unsaved in-memory source.
+`id` is the logical preset ID used by [List presets](#list-presets) and
+[Load a saved preset](#load-a-saved-preset) (`bundled/<pack>/<name>.milk` or
+`workspace/...`), i.e. the reverse mapping of the resolved file path.
+
+`name` and `id` are empty and `fileBacked` is `false` before a preset is active
+or when the current preset was loaded from unsaved in-memory source. `id` is
+also empty when the active file cannot be mapped back to a bundled or workspace
+preset.
 
 ```sh
 curl -s http://127.0.0.1:8080/api/v1/playback/current

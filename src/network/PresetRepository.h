@@ -56,6 +56,7 @@ public:
     PresetDocument Update(const std::string& id, const std::string& source,
                           const std::string& expectedEtag);
     std::string ResolvePath(const std::string& id) const;
+    std::string ResolveId(const std::string& path) const;
 
     std::size_t MaxPresetBytes() const;
     const std::string& WorkspaceRoot() const;

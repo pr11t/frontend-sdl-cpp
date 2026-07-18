@@ -92,6 +92,7 @@ void NetworkControlSubsystem::initialize(Poco::Util::Application& app)
         const auto maxPresetBytes = app.config().getUInt64("network.maxPresetBytes", 1048576);
         _presets = std::make_unique<PresetRepository>(
             workspace, bundledRoots, static_cast<std::size_t>(maxPresetBytes));
+        _playback.SetPresetRepository(_presets.get());
 
         auto& projectMSDLApp = dynamic_cast<ProjectMSDLApplication&>(app);
         ConfigLayers configLayers;

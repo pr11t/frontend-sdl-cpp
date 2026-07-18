@@ -144,6 +144,42 @@ std::string PresetRepository::ResolvePath(const std::string& id) const
     return Resolve(id, true).path;
 }
 
+std::string PresetRepository::ResolveId(const std::string& path) const
+{
+    if (path.empty())
+    {
+        return "";
+    }
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
+    const auto absolute = Poco::Path(path).absolute().toString();
+
+    const auto match = [&absolute](const std::string& root,
+                                   const std::string& prefix) -> std::string {
+        if (absolute.size() <= root.size() || absolute.compare(0, root.size(), root) != 0)
+        {
+            return "";
+        }
+        auto relative = absolute.substr(root.size());
+        std::replace(relative.begin(), relative.end(), '\\', '/');
+        return prefix + relative;
+    };
+
+    auto id = match(_workspaceRoot, "workspace/");
+    if (!id.empty())
+    {
+        return id;
+    }
+    for (const auto& root : _bundledRoots)
+    {
+        id = match(root, "bundled/");
+        if (!id.empty())
+        {
+            return id;
+        }
+    }
+    return "";
+}
+
 std::size_t PresetRepository::MaxPresetBytes() const
 {
     return _maxPresetBytes;

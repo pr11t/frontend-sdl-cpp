@@ -925,6 +925,7 @@ void ApiRequestHandler::handleRequest(Poco::Net::HTTPServerRequest& request,
             Poco::JSON::Object result;
             result.set("ok", true);
             result.set("name", playback.presetName);
+            result.set("id", playback.presetId);
             result.set("fileBacked", playback.fileBacked);
             return WriteJson(response, Poco::Net::HTTPResponse::HTTP_OK, result);
         }

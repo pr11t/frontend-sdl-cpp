@@ -1,11 +1,14 @@
+#include "network/ConfigLayers.h"
 #include "network/ControlCommandQueue.h"
 #include "network/HttpApiServer.h"
 #include "network/JobRegistry.h"
 #include "network/PlaybackState.h"
 #include "network/PresetRepository.h"
+#include "network/TextureStore.h"
 #include "network/VisualState.h"
 
 #include <Poco/File.h>
+#include <Poco/Util/MapConfiguration.h>
 #include <Poco/FileStream.h>
 #include <Poco/JSON/Object.h>
 #include <Poco/JSON/Parser.h>
@@ -88,7 +91,14 @@ void RunTests()
     PresetRepository presets(workspace, {bundled}, 1024 * 1024);
     VisualStateStore visuals;
     PlaybackStateStore playback;
-    HttpApiServer server(queue, jobs, presets, visuals, playback);
+    playback.SetPresetRepository(&presets);
+    TextureStore textures;
+    ConfigLayers configLayers;
+    configLayers.effective = new Poco::Util::MapConfiguration();
+    configLayers.runtime = new Poco::Util::MapConfiguration();
+    configLayers.commandLine = new Poco::Util::MapConfiguration();
+    configLayers.user = new Poco::Util::MapConfiguration();
+    HttpApiServer server(queue, jobs, presets, visuals, playback, textures, configLayers);
     server.Start("127.0.0.1", 0);
     Require(server.Running(), "Server should be running.");
     Require(server.Port() != 0, "Ephemeral server port should be assigned.");
@@ -104,6 +114,8 @@ void RunTests()
             "Current preset should return 200.");
     Require(noCurrentPreset.body->getValue<std::string>("name").empty(),
             "Current preset name should initially be empty.");
+    Require(noCurrentPreset.body->getValue<std::string>("id").empty(),
+            "Current preset id should initially be empty.");
     Require(!noCurrentPreset.body->getValue<bool>("fileBacked"),
             "An empty current preset should not be file-backed.");
 
@@ -113,8 +125,20 @@ void RunTests()
     Require(currentPreset.body->getValue<std::string>("name") ==
                 "Artist - Example.milk",
             "Current preset should return only the file name.");
+    Require(currentPreset.body->getValue<std::string>("id").empty(),
+            "A file outside any preset root should have an empty logical id.");
     Require(currentPreset.body->getValue<bool>("fileBacked"),
             "A preset file should be reported as file-backed.");
+
+    playback.SetCurrentPresetFile(bundledPreset);
+    auto bundledCurrent = Request(server.Port(), "GET",
+                                  "/api/v1/playback/current");
+    Require(bundledCurrent.body->getValue<std::string>("name") == "read-only.milk",
+            "A bundled preset should report its file name.");
+    Require(bundledCurrent.body->getValue<std::string>("id") == "bundled/read-only.milk",
+            "A bundled preset should map back to its logical id.");
+    Require(bundledCurrent.body->getValue<bool>("fileBacked"),
+            "A bundled preset should be reported as file-backed.");
 
     auto visualDisabled = Request(server.Port(), "GET", "/api/v1/visual");
     Require(visualDisabled.status == Poco::Net::HTTPResponse::HTTP_OK,
