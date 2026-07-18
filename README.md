@@ -1,5 +1,11 @@
 # ProjectM SDL2 Frontend
 
+> [!NOTE]
+> This is a personal vibe coded fork of
+> [projectM-visualizer/frontend-sdl-cpp](https://github.com/projectM-visualizer/frontend-sdl-cpp).
+> It adds a network-control API, live preset-development endpoints, and optional visual post-processing.
+> It is not intended for upstream contribution, and comes with no support.
+
 This is a reference implementation of an application that makes use of the projectM music visualization library.
 
 It will listen to audio input and produce mesmerizing visuals. Some commands are supported.
@@ -7,13 +13,22 @@ It will listen to audio input and produce mesmerizing visuals. Some commands are
 This project is in a bit of a transition state and is in the process of being modernized. There are many rough edges at
 present.
 
+## Fork-specific documentation
+
+- [Build and run this fork](docs/building.md)
+- [Network API reference](docs/network-api.md)
+
+The API has no authentication and can modify presets in its configured
+workspace. Read the security section in the API reference before exposing it
+on a network.
+
 ## Building from source
 
 ### Build and install libprojectM
 
 First, [build libprojectM](https://github.com/projectM-visualizer/projectm/wiki/Building-libprojectM) or get it via your
 favorite dependency management/packaging tool. For testing, you can install libprojectM somewhere inside your
-home/development directory using `CMAKE_INSTALL_PREFIX`, then pass the same install path to the frontend-sdl2 build
+home/development directory using `CMAKE_INSTALL_PREFIX`, then pass the same install path to the frontend-sdl-cpp build
 using `CMAKE_PREFIX_PATH`. Please refer
 to [CMake's documentation](https://cmake.org/cmake/help/latest/variable/CMAKE_PREFIX_PATH.html) for details.
 
@@ -184,11 +199,11 @@ cmake --install cmake-build
 cd ..
 ```
 
-**2. Build frontend-sdl2**
+**2. Build frontend-sdl-cpp**
 
 ```shell
-git clone --recurse-submodules https://github.com/projectM-visualizer/frontend-sdl2.git
-cd frontend-sdl2 && mkdir cmake-build
+git clone --recurse-submodules https://github.com/projectM-visualizer/frontend-sdl-cpp.git
+cd frontend-sdl-cpp && mkdir cmake-build
 cmake -G Ninja -S . -B cmake-build \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_PREFIX_PATH=~/dev/projectm-install \
