@@ -5,6 +5,7 @@
 #include "SDLRenderingWindow.h"
 
 #include "notifications/QuitNotification.h"
+#include "network/NetworkControlSubsystem.h"
 
 #include <Poco/Logger.h>
 #include <Poco/NObserver.h>
@@ -43,6 +44,11 @@ protected:
     void CheckViewportSize();
 
     /**
+     * @brief Executes remote-control commands on the render thread.
+     */
+    void DrainNetworkCommands();
+
+    /**
      * @brief Handles SDL key press events.
      * @param event The key event.
      */
@@ -75,6 +81,7 @@ protected:
     AudioCapture& _audioCapture;
     ProjectMWrapper& _projectMWrapper;
     SDLRenderingWindow& _sdlRenderingWindow;
+    NetworkControlSubsystem& _networkControl;
 
     projectm_handle _projectMHandle{nullptr};
     projectm_playlist_handle _playlistHandle{nullptr};

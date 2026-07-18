@@ -100,6 +100,16 @@ projectM.hardCutDuration = 20
 # on presets using the aspect ration actively.
 projectM.aspectCorrectionEnabled = true
 
+### Network remote-control API
+
+# Enables the HTTP/JSON remote-control API. The API does not provide authentication.
+network.enabled = true
+
+# Listen on all interfaces so the application can be controlled from the local network.
+# Only use this on a trusted network or restrict access with the host firewall.
+network.bindAddress = 0.0.0.0
+network.port = 8080
+
 
 ### Logging settings
 

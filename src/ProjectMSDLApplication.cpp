@@ -9,6 +9,7 @@
 #include "RenderLoop.h"
 #include "SDLRenderingWindow.h"
 #include "gui/ProjectMGUI.h"
+#include "network/NetworkControlSubsystem.h"
 
 #include <Poco/Environment.h>
 #include <Poco/File.h>
@@ -24,6 +25,7 @@ ProjectMSDLApplication::ProjectMSDLApplication()
     // Note: order here is important, as subsystems are initialized in the same order.
     addSubsystem(new SDLRenderingWindow);
     addSubsystem(new ProjectMWrapper);
+    addSubsystem(new NetworkControlSubsystem);
     addSubsystem(new AudioCapture);
     addSubsystem(new ProjectMGUI);
 }
@@ -233,6 +235,18 @@ void ProjectMSDLApplication::defineOptions(Poco::Util::OptionSet& options)
     options.addOption(Option("beatSensitivity", "", "Beat sensitivity. Between 0.0 and 2.0. Default 1.0.",
                              false, "<number>", true)
                           .binding("projectM.beatSensitivity", _commandLineOverrides));
+
+    options.addOption(Option("networkEnabled", "", "Enable the unauthenticated HTTP remote-control API.",
+                             false, "<0/1>", true)
+                          .binding("network.enabled", _commandLineOverrides));
+
+    options.addOption(Option("networkBindAddress", "", "Address on which the HTTP remote-control API listens.",
+                             false, "<address>", true)
+                          .binding("network.bindAddress", _commandLineOverrides));
+
+    options.addOption(Option("networkPort", "", "TCP port on which the HTTP remote-control API listens.",
+                             false, "<number>", true)
+                          .binding("network.port", _commandLineOverrides));
 }
 
 int ProjectMSDLApplication::main(POCO_UNUSED const std::vector<std::string>& args)

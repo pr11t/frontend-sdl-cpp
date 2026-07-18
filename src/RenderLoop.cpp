@@ -16,6 +16,7 @@ RenderLoop::RenderLoop()
     : _audioCapture(Poco::Util::Application::instance().getSubsystem<AudioCapture>())
     , _projectMWrapper(Poco::Util::Application::instance().getSubsystem<ProjectMWrapper>())
     , _sdlRenderingWindow(Poco::Util::Application::instance().getSubsystem<SDLRenderingWindow>())
+    , _networkControl(Poco::Util::Application::instance().getSubsystem<NetworkControlSubsystem>())
     , _projectMHandle(_projectMWrapper.ProjectM())
     , _playlistHandle(_projectMWrapper.Playlist())
     , _projectMGui(Poco::Util::Application::instance().getSubsystem<ProjectMGUI>())
@@ -38,6 +39,7 @@ void RenderLoop::Run()
         limiter.TargetFPS(_projectMWrapper.TargetFPS());
         limiter.StartFrame();
 
+        DrainNetworkCommands();
         PollEvents();
         CheckViewportSize();
         _audioCapture.FillBuffer();
@@ -55,6 +57,35 @@ void RenderLoop::Run()
     notificationCenter.removeObserver(_quitNotificationObserver);
 
     projectm_playlist_set_preset_switched_event_callback(_playlistHandle, nullptr, nullptr);
+}
+
+void RenderLoop::DrainNetworkCommands()
+{
+    constexpr std::size_t maxCommandsPerFrame = 32;
+
+    for (std::size_t commandIndex = 0; commandIndex < maxCommandsPerFrame; ++commandIndex)
+    {
+        ControlCommand command{};
+        if (!_networkControl.Commands().TryDequeue(command))
+        {
+            break;
+        }
+
+        PlaybackControlNotification::Action action;
+        switch (command.type)
+        {
+            case ControlCommandType::NextPreset:
+                action = PlaybackControlNotification::Action::NextPreset;
+                break;
+
+            case ControlCommandType::PreviousPreset:
+                action = PlaybackControlNotification::Action::PreviousPreset;
+                break;
+        }
+
+        Poco::NotificationCenter::defaultCenter().postNotification(
+            new PlaybackControlNotification(action, command.smoothTransition));
+    }
 }
 
 void RenderLoop::PollEvents()

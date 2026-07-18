@@ -1,5 +1,6 @@
 add_subdirectory(notifications)
 add_subdirectory(gui)
+add_subdirectory(network)
 
 set(PROJECTM_CONFIGURATION_FILE "${CMAKE_CURRENT_BINARY_DIR}/projectMSDL.properties")
 set(PROJECTM_CONFIGURATION_FILE "${PROJECTM_CONFIGURATION_FILE}" PARENT_SCOPE)
@@ -18,6 +19,8 @@ add_executable(projectMSDL WIN32 MACOSX_BUNDLE
         RenderLoop.h
         SDLRenderingWindow.cpp
         SDLRenderingWindow.h
+        network/NetworkControlSubsystem.cpp
+        network/NetworkControlSubsystem.h
         main.cpp
         projectMSDL.rc
         )
@@ -83,6 +86,7 @@ target_compile_definitions(projectMSDL
 target_link_libraries(projectMSDL
         PRIVATE
         ProjectMSDL-GUI
+        ProjectMSDL-Network
         ProjectMSDL-Notifications
         libprojectM::playlist
         Poco::Util

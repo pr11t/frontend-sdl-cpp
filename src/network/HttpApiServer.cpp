@@ -1,0 +1,63 @@
+#include "network/HttpApiServer.h"
+
+#include "network/ApiRequestHandler.h"
+
+#include <Poco/Net/HTTPServerParams.h>
+#include <Poco/Net/ServerSocket.h>
+#include <Poco/Net/SocketAddress.h>
+#include <Poco/Timespan.h>
+
+HttpApiServer::HttpApiServer(ControlCommandQueue& commands)
+    : _commands(commands)
+{
+}
+
+HttpApiServer::~HttpApiServer()
+{
+    Stop();
+}
+
+void HttpApiServer::Start(const std::string& bindAddress, std::uint16_t port)
+{
+    if (_server)
+    {
+        return;
+    }
+
+    Poco::Net::ServerSocket socket(Poco::Net::SocketAddress(bindAddress, port));
+    _port = socket.address().port();
+
+    Poco::Net::HTTPServerParams::Ptr parameters = new Poco::Net::HTTPServerParams;
+    parameters->setSoftwareVersion("projectMSDL/1");
+    parameters->setMaxThreads(4);
+    parameters->setMaxQueued(16);
+    parameters->setKeepAlive(true);
+    parameters->setMaxKeepAliveRequests(32);
+    parameters->setTimeout(Poco::Timespan(10, 0));
+
+    _server = std::make_unique<Poco::Net::HTTPServer>(
+        new ApiRequestHandlerFactory(_commands), socket, parameters);
+    _server->start();
+}
+
+void HttpApiServer::Stop()
+{
+    if (!_server)
+    {
+        return;
+    }
+
+    _server->stopAll(true);
+    _server.reset();
+    _port = 0;
+}
+
+bool HttpApiServer::Running() const
+{
+    return _server != nullptr;
+}
+
+std::uint16_t HttpApiServer::Port() const
+{
+    return _port;
+}
