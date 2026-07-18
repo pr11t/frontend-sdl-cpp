@@ -97,6 +97,10 @@ void RenderLoop::DrainNetworkCommands()
                 action = PlaybackControlNotification::Action::PreviousPreset;
                 break;
 
+            case ControlCommandType::RandomPreset:
+                action = PlaybackControlNotification::Action::RandomPreset;
+                break;
+
             case ControlCommandType::LoadPresetFile:
             case ControlCommandType::ReloadCurrentPreset:
             case ControlCommandType::LoadPresetSource: {

@@ -379,7 +379,9 @@ void ApiRequestHandler::handleRequest(Poco::Net::HTTPServerRequest& request,
             return WriteJson(response, Poco::Net::HTTPResponse::HTTP_ACCEPTED, result);
         }
 
-        if (path == "/api/v1/playback/next" || path == "/api/v1/playback/previous")
+        if (path == "/api/v1/playback/next" ||
+            path == "/api/v1/playback/previous" ||
+            path == "/api/v1/playback/random")
         {
             if (method != "POST")
             {
@@ -400,8 +402,18 @@ void ApiRequestHandler::handleRequest(Poco::Net::HTTPServerRequest& request,
             {
                 return;
             }
-            const auto type = path.back() == 't' ? ControlCommandType::NextPreset
-                                                 : ControlCommandType::PreviousPreset;
+            auto type = ControlCommandType::NextPreset;
+            std::string commandName{"next"};
+            if (path == "/api/v1/playback/previous")
+            {
+                type = ControlCommandType::PreviousPreset;
+                commandName = "previous";
+            }
+            else if (path == "/api/v1/playback/random")
+            {
+                type = ControlCommandType::RandomPreset;
+                commandName = "random";
+            }
             if (!_commands.TryEnqueue({type, smooth, 0, ""}))
             {
                 return WriteError(response, Poco::Net::HTTPResponse::HTTP_SERVICE_UNAVAILABLE,
@@ -409,7 +421,7 @@ void ApiRequestHandler::handleRequest(Poco::Net::HTTPServerRequest& request,
             }
             Poco::JSON::Object result;
             result.set("ok", true);
-            result.set("command", type == ControlCommandType::NextPreset ? "next" : "previous");
+            result.set("command", commandName);
             result.set("queued", true);
             return WriteJson(response, Poco::Net::HTTPResponse::HTTP_ACCEPTED, result);
         }

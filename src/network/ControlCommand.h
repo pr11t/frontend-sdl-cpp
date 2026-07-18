@@ -9,6 +9,7 @@ enum class ControlCommandType
 {
     NextPreset,
     PreviousPreset,
+    RandomPreset,
     LoadPresetFile,
     ReloadCurrentPreset,
     LoadPresetSource,

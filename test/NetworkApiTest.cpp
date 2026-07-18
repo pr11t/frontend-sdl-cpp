@@ -164,6 +164,18 @@ void RunTests()
             "Previous command type should match.");
     Require(previousCommand.smoothTransition, "Previous should request a smooth transition.");
 
+    auto random = Request(server.Port(), "POST", "/api/v1/playback/random", "{}");
+    Require(random.status == Poco::Net::HTTPResponse::HTTP_ACCEPTED,
+            "Random should return 202.");
+    Require(random.body->getValue<std::string>("command") == "random",
+            "Random response should identify the command.");
+    ControlCommand randomCommand{};
+    Require(queue.TryDequeue(randomCommand), "Random command should be queued.");
+    Require(randomCommand.type == ControlCommandType::RandomPreset,
+            "Random command type should match.");
+    Require(!randomCommand.smoothTransition,
+            "Random should default to a hard transition.");
+
     auto invalidJson = Request(server.Port(), "POST", "/api/v1/playback/next", "{");
     Require(invalidJson.status == Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
             "Invalid JSON should return 400.");
