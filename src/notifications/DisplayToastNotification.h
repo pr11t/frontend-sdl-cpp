@@ -1,6 +1,11 @@
 #pragma once
 
+#include "notifications/ToastOptions.h"
+
 #include <Poco/Notification.h>
+
+#include <string>
+#include <utility>
 
 /**
  * @brief Informs the GUI subsystem to queue a new toast message.
@@ -12,13 +17,20 @@ public:
 
     DisplayToastNotification() = delete;
 
-    explicit DisplayToastNotification(std::string toastText, float displayTime = 3.0f);
+    /// Convenience constructor for a plain, centered toast.
+    explicit DisplayToastNotification(std::string toastText, float displayTime = 3.0f)
+    {
+        _options.text = std::move(toastText);
+        _options.displayTime = displayTime;
+    }
 
-    const std::string& ToastText() const;
+    explicit DisplayToastNotification(ToastOptions options)
+        : _options(std::move(options))
+    {
+    }
 
-    float DisplayTime() const;
+    const ToastOptions& Options() const;
 
 private:
-    std::string _toastText;
-    float _displayTime;
+    ToastOptions _options;
 };

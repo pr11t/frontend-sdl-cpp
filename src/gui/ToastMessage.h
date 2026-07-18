@@ -1,6 +1,6 @@
 #pragma once
 
-#include <string>
+#include "notifications/ToastOptions.h"
 
 class ProjectMGUI;
 
@@ -9,7 +9,7 @@ class ToastMessage
 public:
     ToastMessage() = delete;
 
-    explicit ToastMessage(std::string toastText, float displayTime);
+    explicit ToastMessage(ToastOptions options);
 
     /**
      * @brief Draws the toast message and returns if it still should be kept.
@@ -19,11 +19,10 @@ public:
     bool Draw(float lastFrameTime);
 
 private:
-
     ProjectMGUI& _gui; //!< Reference to the projectM GUI instance
 
-    std::string _toastText; //!< The toast message text to be displayed.
-    float _displayTimeLeft{3.0f}; //!< Remaining toast message display time in seconds.
+    ToastOptions _options; //!< Appearance and behaviour of this toast.
+    float _totalTime; //!< Initial display time, for animation progress.
+    float _displayTimeLeft; //!< Remaining toast message display time in seconds.
     bool _broughtToFront{false}; //!< true if the toast window was already made topmost once.
-
 };

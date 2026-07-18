@@ -161,7 +161,7 @@ void RenderLoop::DrainNetworkCommands()
                 // Posted on the render thread so the GUI observer mutates the
                 // toast state on the same thread that draws it.
                 Poco::NotificationCenter::defaultCenter().postNotification(
-                    new DisplayToastNotification(command.payload, command.toastSeconds));
+                    new DisplayToastNotification(command.toast));
                 continue;
         }
 

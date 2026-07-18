@@ -73,6 +73,72 @@ bool ValidTextureName(const std::string& name)
     return true;
 }
 
+bool ParseToastAnchor(const std::string& value, ToastOptions::Anchor& anchor)
+{
+    if (value == "center") { anchor = ToastOptions::Anchor::Center; return true; }
+    if (value == "top") { anchor = ToastOptions::Anchor::Top; return true; }
+    if (value == "bottom") { anchor = ToastOptions::Anchor::Bottom; return true; }
+    if (value == "left") { anchor = ToastOptions::Anchor::Left; return true; }
+    if (value == "right") { anchor = ToastOptions::Anchor::Right; return true; }
+    if (value == "top-left") { anchor = ToastOptions::Anchor::TopLeft; return true; }
+    if (value == "top-right") { anchor = ToastOptions::Anchor::TopRight; return true; }
+    if (value == "bottom-left") { anchor = ToastOptions::Anchor::BottomLeft; return true; }
+    if (value == "bottom-right") { anchor = ToastOptions::Anchor::BottomRight; return true; }
+    return false;
+}
+
+bool ParseToastAnimation(const std::string& value, ToastOptions::Animation& animation)
+{
+    if (value == "fade") { animation = ToastOptions::Animation::Fade; return true; }
+    if (value == "scroll") { animation = ToastOptions::Animation::Scroll; return true; }
+    if (value == "slide") { animation = ToastOptions::Animation::Slide; return true; }
+    return false;
+}
+
+// Parses "#RRGGBB" or "#RRGGBBAA" into 0..1 colour components.
+bool ParseHexColor(const std::string& value, float& r, float& g, float& b, float& a)
+{
+    if (value.empty() || value.front() != '#')
+    {
+        return false;
+    }
+    const std::string hex = value.substr(1);
+    if (hex.size() != 6 && hex.size() != 8)
+    {
+        return false;
+    }
+    auto nibble = [](char c) -> int {
+        if (c >= '0' && c <= '9') { return c - '0'; }
+        if (c >= 'a' && c <= 'f') { return c - 'a' + 10; }
+        if (c >= 'A' && c <= 'F') { return c - 'A' + 10; }
+        return -1;
+    };
+    auto byte = [&](std::size_t i) -> int {
+        const int hi = nibble(hex[i]);
+        const int lo = nibble(hex[i + 1]);
+        return (hi < 0 || lo < 0) ? -1 : hi * 16 + lo;
+    };
+    const int rr = byte(0), gg = byte(2), bb = byte(4);
+    if (rr < 0 || gg < 0 || bb < 0)
+    {
+        return false;
+    }
+    r = static_cast<float>(rr) / 255.0f;
+    g = static_cast<float>(gg) / 255.0f;
+    b = static_cast<float>(bb) / 255.0f;
+    a = 1.0f;
+    if (hex.size() == 8)
+    {
+        const int aa = byte(6);
+        if (aa < 0)
+        {
+            return false;
+        }
+        a = static_cast<float>(aa) / 255.0f;
+    }
+    return true;
+}
+
 void WriteJson(Poco::Net::HTTPServerResponse& response,
                Poco::Net::HTTPResponse::HTTPStatus status,
                const Poco::JSON::Object& body)
@@ -726,22 +792,23 @@ void ApiRequestHandler::handleRequest(Poco::Net::HTTPServerRequest& request,
                 return;
             }
             const auto object = ParseObject(body);
-            if (!Fields(object, {"text", "durationSeconds"}, response))
+            if (!Fields(object, {"text", "durationSeconds", "position", "color", "size", "animation"}, response))
             {
                 return;
             }
+
+            ToastOptions options;
             if (!object->has("text") || !object->get("text").isString())
             {
                 return WriteError(response, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
                                   "invalid_request", "text is required and must be a string.");
             }
-            const auto text = object->getValue<std::string>("text");
-            if (text.empty() || text.size() > 500)
+            options.text = object->getValue<std::string>("text");
+            if (options.text.empty() || options.text.size() > 500)
             {
                 return WriteError(response, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
                                   "invalid_request", "text must be 1-500 characters.");
             }
-            double durationSeconds = 3.0;
             if (object->has("durationSeconds"))
             {
                 const auto value = object->get("durationSeconds");
@@ -750,18 +817,63 @@ void ApiRequestHandler::handleRequest(Poco::Net::HTTPServerRequest& request,
                     return WriteError(response, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
                                       "invalid_request", "durationSeconds must be a number.");
                 }
-                durationSeconds = value.convert<double>();
+                const double durationSeconds = value.convert<double>();
                 if (!std::isfinite(durationSeconds) || durationSeconds < 0.5 || durationSeconds > 60.0)
                 {
                     return WriteError(response, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
                                       "invalid_request", "durationSeconds must be between 0.5 and 60.");
                 }
+                options.displayTime = static_cast<float>(durationSeconds);
+            }
+            if (object->has("position"))
+            {
+                if (!object->get("position").isString() ||
+                    !ParseToastAnchor(object->getValue<std::string>("position"), options.anchor))
+                {
+                    return WriteError(response, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
+                                      "invalid_request",
+                                      "position must be one of center, top, bottom, left, right, "
+                                      "top-left, top-right, bottom-left, bottom-right.");
+                }
+            }
+            if (object->has("animation"))
+            {
+                if (!object->get("animation").isString() ||
+                    !ParseToastAnimation(object->getValue<std::string>("animation"), options.animation))
+                {
+                    return WriteError(response, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
+                                      "invalid_request", "animation must be one of fade, scroll, slide.");
+                }
+            }
+            if (object->has("color"))
+            {
+                if (!object->get("color").isString() ||
+                    !ParseHexColor(object->getValue<std::string>("color"), options.r, options.g, options.b, options.a))
+                {
+                    return WriteError(response, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
+                                      "invalid_request", "color must be a hex string like #RRGGBB or #RRGGBBAA.");
+                }
+            }
+            if (object->has("size"))
+            {
+                const auto value = object->get("size");
+                if (!value.isNumeric())
+                {
+                    return WriteError(response, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
+                                      "invalid_request", "size must be a number.");
+                }
+                const double size = value.convert<double>();
+                if (!std::isfinite(size) || size < 0.25 || size > 8.0)
+                {
+                    return WriteError(response, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
+                                      "invalid_request", "size must be between 0.25 and 8.");
+                }
+                options.scale = static_cast<float>(size);
             }
 
             ControlCommand command;
             command.type = ControlCommandType::ShowToast;
-            command.payload = text;
-            command.toastSeconds = static_cast<float>(durationSeconds);
+            command.toast = options;
             if (!_commands.TryEnqueue(command))
             {
                 return WriteError(response, Poco::Net::HTTPResponse::HTTP_SERVICE_UNAVAILABLE,

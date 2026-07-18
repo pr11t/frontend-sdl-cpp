@@ -447,7 +447,11 @@ Content-Type: application/json
 | Field | Type and range |
 | --- | --- |
 | `text` | String, 1–500 characters (required) |
-| `durationSeconds` | Number from `0.5` through `60`; default `3` (optional) |
+| `durationSeconds` | Number from `0.5` through `60`; default `3` |
+| `position` | `center` (default), `top`, `bottom`, `left`, `right`, `top-left`, `top-right`, `bottom-left`, `bottom-right` |
+| `color` | Hex string `#RRGGBB` or `#RRGGBBAA`; default white |
+| `size` | Font size multiplier, `0.25`–`8`; default `1` |
+| `animation` | `fade` (default), `scroll` (horizontal ticker), `slide` (slides in from the left) |
 
 ```sh
 curl -s -X POST \
@@ -456,8 +460,19 @@ curl -s -X POST \
   http://127.0.0.1:8080/api/v1/toast
 ```
 
+A scrolling "now playing" ticker along the bottom:
+
+```sh
+curl -s -X POST \
+  -H 'Content-Type: application/json' \
+  -d '{"text":"♪ Artist — Song Title ♪","animation":"scroll","position":"bottom","color":"#ffd000","durationSeconds":8}' \
+  http://127.0.0.1:8080/api/v1/toast
+```
+
 The toast is queued and rendered on the next frame. Text rendering happens in
 the application, so the request carries a plain string — no image is needed.
+With `scroll`, the text travels across the screen over the display time and the
+`position` sets the vertical placement only.
 
 > [!NOTE]
 > Toasts respect the `projectM.displayToasts` setting; if it is disabled, the
