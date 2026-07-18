@@ -172,6 +172,13 @@ void ProjectMWrapper::RenderFrame() const
 
 void ProjectMWrapper::RenderFrameToFramebuffer(std::uint32_t framebuffer) const
 {
+    // projectm_opengl_render_frame_fbo() is the only supported way to make
+    // libprojectM composite into a caller-owned FBO (RenderFrame() otherwise
+    // hard-binds the target framebuffer itself). The symbol is unreleased --
+    // it exists on libprojectM master but in no release tag up to 4.1.7 -- so
+    // the vcpkg build pins projectm to a master commit via vcpkg-overlays/.
+    // See vcpkg-overlays/projectm/portfile.cmake for the rationale and the
+    // follow-up plan (release-tag bump or FBO-free post-processing rework).
     projectm_opengl_render_frame_fbo(_projectM, framebuffer);
 }
 
