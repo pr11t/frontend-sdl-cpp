@@ -58,8 +58,13 @@ void RenderLoop::Run()
         _audioCapture.FillBuffer();
         if (_visualPostProcessor.Active())
         {
+            PostProcessInputs inputs;
+            inputs.time = static_cast<float>(SDL_GetTicks()) / 1000.0F;
             _visualPostProcessor.Render(_projectMWrapper,
-                                        _networkControl.Visuals().Get());
+                                        _networkControl.Visuals().Get(),
+                                        _networkControl.Shaders(),
+                                        _networkControl.Textures(),
+                                        inputs);
         }
         else
         {

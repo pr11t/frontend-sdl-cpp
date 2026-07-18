@@ -49,6 +49,11 @@ TextureStore& NetworkControlSubsystem::Textures()
     return _textures;
 }
 
+ShaderChainStore& NetworkControlSubsystem::Shaders()
+{
+    return _shaders;
+}
+
 void NetworkControlSubsystem::initialize(Poco::Util::Application& app)
 {
     _visuals.SetEnabled(app.config().getBool("visual.postProcessingEnabled", false));
@@ -102,7 +107,7 @@ void NetworkControlSubsystem::initialize(Poco::Util::Application& app)
         configLayers.user = projectMSDLApp.UserConfiguration();
 
         _server = std::make_unique<HttpApiServer>(_commands, _jobs, *_presets,
-                                                  _visuals, _playback, _textures, configLayers);
+                                                  _visuals, _playback, _textures, _shaders, configLayers);
         _server->Start(bindAddress, static_cast<std::uint16_t>(configuredPort));
         poco_information_f2(_logger, "Unauthenticated HTTP remote-control API listening on %s:%?d.",
                             bindAddress, configuredPort);

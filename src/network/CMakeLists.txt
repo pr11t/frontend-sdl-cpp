@@ -13,6 +13,8 @@ add_library(ProjectMSDL-Network STATIC
         PlaybackState.h
         PresetRepository.cpp
         PresetRepository.h
+        ShaderChainStore.cpp
+        ShaderChainStore.h
         StbImageImpl.cpp
         TextureStore.cpp
         TextureStore.h

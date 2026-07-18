@@ -42,6 +42,12 @@ public:
     /// Lists the currently stored textures (name and dimensions).
     std::vector<Entry> List() const;
 
+    /// Returns the image stored under @p name (case-insensitive), or nullptr.
+    DecodedImagePtr Find(const std::string& name) const;
+
+    /// Counter bumped on every change; lets consumers cache and detect updates.
+    std::uint64_t Generation() const;
+
     /**
      * @brief projectM texture-load callback. Register with
      * projectm_set_texture_load_event_callback, passing a TextureStore* as
@@ -55,4 +61,5 @@ private:
     mutable std::mutex _mutex;
     std::map<std::string, DecodedImagePtr> _textures; //!< Keyed by lower-cased name.
     DecodedImagePtr _pinned; //!< Keeps the last-served image alive until projectM has consumed it.
+    std::uint64_t _generation{0}; //!< Bumped on every change.
 };

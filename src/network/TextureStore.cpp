@@ -24,12 +24,18 @@ void TextureStore::Set(const std::string& name, DecodedImagePtr image)
     {
         _textures.erase(LowerKey(name));
     }
+    ++_generation;
 }
 
 bool TextureStore::Remove(const std::string& name)
 {
     std::lock_guard<std::mutex> lock(_mutex);
-    return _textures.erase(LowerKey(name)) > 0;
+    const bool removed = _textures.erase(LowerKey(name)) > 0;
+    if (removed)
+    {
+        ++_generation;
+    }
+    return removed;
 }
 
 std::size_t TextureStore::Clear()
@@ -37,7 +43,21 @@ std::size_t TextureStore::Clear()
     std::lock_guard<std::mutex> lock(_mutex);
     const auto count = _textures.size();
     _textures.clear();
+    ++_generation;
     return count;
+}
+
+DecodedImagePtr TextureStore::Find(const std::string& name) const
+{
+    std::lock_guard<std::mutex> lock(_mutex);
+    const auto it = _textures.find(LowerKey(name));
+    return it == _textures.end() ? nullptr : it->second;
+}
+
+std::uint64_t TextureStore::Generation() const
+{
+    std::lock_guard<std::mutex> lock(_mutex);
+    return _generation;
 }
 
 std::vector<TextureStore::Entry> TextureStore::List() const

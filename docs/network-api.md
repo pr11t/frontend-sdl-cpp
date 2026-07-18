@@ -696,3 +696,102 @@ DELETE /api/v1/config
   "cleared": 2
 }
 ```
+
+## Post-processing shader chain
+
+When visual post-processing is enabled (`--enableVisualPostProcessing`), projectM
+is rendered into an offscreen buffer and then run through the built-in transform
+(mirror/rotation/zoom, see [Visual controls](#visual-controls)) followed by a
+configurable chain of **uploaded fragment shaders**. Each pass reads the previous
+pass's output, an optional named [texture](#in-memory-textures), and standard
+uniforms, and writes the result to the next pass; the last pass renders to the
+screen.
+
+### Writing a shader
+
+Upload the body of a fragment shader that defines:
+
+```glsl
+vec4 effect(vec2 uv)
+{
+    vec4 src = texture(uInput, uv);   // previous pass / projectM output
+    return src;
+}
+```
+
+The following are provided (declare extra `uniform float <name>;` for custom
+parameters):
+
+| Uniform | Meaning |
+| --- | --- |
+| `sampler2D uInput` | Output of the previous pass (the image so far) |
+| `sampler2D uTexture` | The pass's named texture, or 1×1 black if none |
+| `vec2 uResolution` | Output size in pixels |
+| `float uTime` | Seconds since start |
+
+Do **not** include a `#version` line or `main()` — those are added for you.
+
+### Upload / list / remove shaders
+
+```http
+PUT    /api/v1/shaders/{name}     Content-Type: text/plain   (body = GLSL source)
+GET    /api/v1/shaders
+DELETE /api/v1/shaders/{name}
+```
+
+Names are 1–128 characters of `[A-Za-z0-9_.-]`. Uploading returns `202`;
+compilation happens on the render thread when the shader is used in the chain.
+`GET /api/v1/shaders` reports each shader's compile status:
+
+```json
+{
+  "ok": true,
+  "shaders": [
+    { "name": "grayscale", "compiled": true },
+    { "name": "broken", "compiled": false, "error": "Shader compilation failed: ..." }
+  ]
+}
+```
+
+A shader that fails to compile is skipped (the rest of the chain still runs).
+
+### Configure the chain
+
+```http
+GET /api/v1/postprocess
+PUT /api/v1/postprocess
+Content-Type: application/json
+```
+
+The chain is an ordered array of passes. Each pass names a shader, and may bind a
+texture (as `uTexture`) and set custom float uniforms:
+
+```json
+{
+  "chain": [
+    { "shader": "grayscale" },
+    { "shader": "tint", "params": { "amount": 0.7 } },
+    { "shader": "albumCorner", "texture": "cover" }
+  ]
+}
+```
+
+`GET` returns the current chain plus `available` (whether post-processing is
+active). Setting an empty `chain` disables all user passes.
+
+Example — a grayscale effect:
+
+```sh
+curl -s -X PUT --data-binary \
+  'vec4 effect(vec2 uv){vec4 c=texture(uInput,uv);float g=dot(c.rgb,vec3(0.3,0.59,0.11));return vec4(vec3(g),1.0);}' \
+  http://127.0.0.1:8080/api/v1/shaders/grayscale
+
+curl -s -X PUT -H 'Content-Type: application/json' \
+  -d '{"chain":[{"shader":"grayscale"}]}' \
+  http://127.0.0.1:8080/api/v1/postprocess
+```
+
+> [!NOTE]
+> The chain only renders when post-processing is enabled at launch
+> (`--enableVisualPostProcessing`). Shaders can be uploaded either way, but the
+> chain has no effect until it is active.

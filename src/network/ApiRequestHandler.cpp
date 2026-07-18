@@ -22,6 +22,7 @@ namespace {
 
 constexpr std::size_t controlBodyLimit = 4096;
 constexpr std::size_t textureBodyLimit = 16 * 1024 * 1024; //!< 16 MiB cap for texture uploads.
+constexpr std::size_t shaderBodyLimit = 256 * 1024; //!< 256 KiB cap for shader source uploads.
 
 // Decodes JPEG/PNG/BMP bytes into a bottom-row-first RGBA image for projectM's
 // texture-load callback. Returns nullptr if the bytes are not a valid image.
@@ -447,13 +448,14 @@ Poco::Dynamic::Var ConfigEffectiveValue(const ConfigLayers& layers, const Config
 ApiRequestHandler::ApiRequestHandler(ControlCommandQueue& commands, JobRegistry& jobs,
                                      PresetRepository& presets, VisualStateStore& visuals,
                                      PlaybackStateStore& playback, TextureStore& textures,
-                                     ConfigLayers configLayers)
+                                     ShaderChainStore& shaders, ConfigLayers configLayers)
     : _commands(commands)
     , _jobs(jobs)
     , _presets(presets)
     , _visuals(visuals)
     , _playback(playback)
     , _textures(textures)
+    , _shaders(shaders)
     , _configLayers(std::move(configLayers))
 {
 }
@@ -776,6 +778,186 @@ void ApiRequestHandler::handleRequest(Poco::Net::HTTPServerRequest& request,
                 result.set("height", image->height);
                 return WriteJson(response, Poco::Net::HTTPResponse::HTTP_ACCEPTED, result);
             }
+        }
+
+        if (path == "/api/v1/shaders")
+        {
+            // Uploaded post-processing fragment shaders.
+            if (method != "GET")
+            {
+                return MethodNotAllowed(response, "GET");
+            }
+            Poco::JSON::Array items;
+            for (const auto& shader : _shaders.ListShaders())
+            {
+                Poco::JSON::Object item;
+                item.set("name", shader.name);
+                item.set("compiled", shader.compiled);
+                if (!shader.error.empty())
+                {
+                    item.set("error", shader.error);
+                }
+                items.add(item);
+            }
+            Poco::JSON::Object body;
+            body.set("ok", true);
+            body.set("shaders", items);
+            return WriteJson(response, Poco::Net::HTTPResponse::HTTP_OK, body);
+        }
+
+        {
+            const std::string shaderPrefix = "/api/v1/shaders/";
+            if (path.compare(0, shaderPrefix.size(), shaderPrefix) == 0)
+            {
+                const auto name = path.substr(shaderPrefix.size());
+                if (!ValidTextureName(name))
+                {
+                    return WriteError(response, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
+                                      "invalid_shader_name",
+                                      "Shader name must be 1-128 characters of [A-Za-z0-9_.-].");
+                }
+                if (method == "DELETE")
+                {
+                    if (!_shaders.RemoveShader(name))
+                    {
+                        return WriteError(response, Poco::Net::HTTPResponse::HTTP_NOT_FOUND,
+                                          "not_found", "No shader named " + name + ".");
+                    }
+                    Poco::JSON::Object result;
+                    result.set("ok", true);
+                    result.set("removed", name);
+                    return WriteJson(response, Poco::Net::HTTPResponse::HTTP_OK, result);
+                }
+                if (method != "PUT")
+                {
+                    return MethodNotAllowed(response, "PUT, DELETE");
+                }
+                std::string body;
+                if (!ReadBody(request, response, shaderBodyLimit, body))
+                {
+                    return;
+                }
+                if (body.empty())
+                {
+                    return WriteError(response, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
+                                      "invalid_request", "Shader source is required.");
+                }
+                _shaders.SetShader(name, body);
+                // Compilation happens on the render thread; status is reported by
+                // GET /api/v1/shaders once the shader is used in the chain.
+                Poco::JSON::Object result;
+                result.set("ok", true);
+                result.set("name", name);
+                return WriteJson(response, Poco::Net::HTTPResponse::HTTP_ACCEPTED, result);
+            }
+        }
+
+        if (path == "/api/v1/postprocess")
+        {
+            if (method == "GET")
+            {
+                Poco::JSON::Array chain;
+                for (const auto& pass : _shaders.Chain())
+                {
+                    Poco::JSON::Object entry;
+                    entry.set("shader", pass.shader);
+                    if (!pass.texture.empty())
+                    {
+                        entry.set("texture", pass.texture);
+                    }
+                    if (!pass.params.empty())
+                    {
+                        Poco::JSON::Object params;
+                        for (const auto& [paramName, paramValue] : pass.params)
+                        {
+                            params.set(paramName, paramValue);
+                        }
+                        entry.set("params", params);
+                    }
+                    chain.add(entry);
+                }
+                Poco::JSON::Object body;
+                body.set("ok", true);
+                body.set("available", _visuals.Get().enabled);
+                body.set("chain", chain);
+                return WriteJson(response, Poco::Net::HTTPResponse::HTTP_OK, body);
+            }
+            if (method != "PUT")
+            {
+                return MethodNotAllowed(response, "GET, PUT");
+            }
+            std::string body;
+            if (!ReadBody(request, response, controlBodyLimit, body))
+            {
+                return;
+            }
+            const auto object = ParseObject(body);
+            if (!Fields(object, {"chain"}, response))
+            {
+                return;
+            }
+            if (!object->has("chain") || !object->isArray("chain"))
+            {
+                return WriteError(response, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
+                                  "invalid_request", "chain must be an array.");
+            }
+            const auto array = object->getArray("chain");
+            std::vector<ShaderPassConfig> chain;
+            for (std::size_t index = 0; index < array->size(); ++index)
+            {
+                if (!array->isObject(index))
+                {
+                    return WriteError(response, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
+                                      "invalid_request", "Each chain entry must be an object.");
+                }
+                const auto entry = array->getObject(index);
+                if (!Fields(entry, {"shader", "texture", "params"}, response))
+                {
+                    return;
+                }
+                ShaderPassConfig pass;
+                if (!entry->has("shader") || !entry->get("shader").isString())
+                {
+                    return WriteError(response, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
+                                      "invalid_request", "Each chain entry needs a shader name.");
+                }
+                pass.shader = entry->getValue<std::string>("shader");
+                if (entry->has("texture"))
+                {
+                    if (!entry->get("texture").isString())
+                    {
+                        return WriteError(response, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
+                                          "invalid_request", "texture must be a string.");
+                    }
+                    pass.texture = entry->getValue<std::string>("texture");
+                }
+                if (entry->has("params"))
+                {
+                    if (!entry->isObject("params"))
+                    {
+                        return WriteError(response, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
+                                          "invalid_request", "params must be an object of numbers.");
+                    }
+                    const auto params = entry->getObject("params");
+                    for (const auto& paramName : params->getNames())
+                    {
+                        const auto value = params->get(paramName);
+                        if (!value.isNumeric())
+                        {
+                            return WriteError(response, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
+                                              "invalid_request", "param " + paramName + " must be a number.");
+                        }
+                        pass.params[paramName] = static_cast<float>(value.convert<double>());
+                    }
+                }
+                chain.push_back(std::move(pass));
+            }
+            const int passCount = static_cast<int>(chain.size());
+            _shaders.SetChain(std::move(chain));
+            Poco::JSON::Object result;
+            result.set("ok", true);
+            result.set("passes", passCount);
+            return WriteJson(response, Poco::Net::HTTPResponse::HTTP_ACCEPTED, result);
         }
 
         if (path == "/api/v1/toast")
@@ -1319,6 +1501,7 @@ ApiRequestHandlerFactory::ApiRequestHandlerFactory(ControlCommandQueue& commands
                                                    VisualStateStore& visuals,
                                                    PlaybackStateStore& playback,
                                                    TextureStore& textures,
+                                                   ShaderChainStore& shaders,
                                                    ConfigLayers configLayers)
     : _commands(commands)
     , _jobs(jobs)
@@ -1326,6 +1509,7 @@ ApiRequestHandlerFactory::ApiRequestHandlerFactory(ControlCommandQueue& commands
     , _visuals(visuals)
     , _playback(playback)
     , _textures(textures)
+    , _shaders(shaders)
     , _configLayers(std::move(configLayers))
 {
 }
@@ -1334,5 +1518,5 @@ Poco::Net::HTTPRequestHandler* ApiRequestHandlerFactory::createRequestHandler(
     const Poco::Net::HTTPServerRequest&)
 {
     return new ApiRequestHandler(_commands, _jobs, _presets, _visuals,
-                                 _playback, _textures, _configLayers);
+                                 _playback, _textures, _shaders, _configLayers);
 }
