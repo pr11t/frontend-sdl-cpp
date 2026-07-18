@@ -13,6 +13,16 @@
 
 #include <cmath>
 
+namespace {
+// projectM treats a preset duration of 0 as "advance almost immediately". Map any
+// non-positive configured duration to an effectively infinite one so that
+// displayDuration = 0 means "never auto-advance", as documented.
+double EffectivePresetDuration(double configured)
+{
+    return configured > 0.0 ? configured : 1.0e9;
+}
+} // namespace
+
 const char* ProjectMWrapper::name() const
 {
     return "ProjectM Wrapper";
@@ -59,7 +69,7 @@ void ProjectMWrapper::initialize(Poco::Util::Application& app)
         projectm_set_preset_locked(_projectM, _projectMConfigView->getBool("presetLocked", false));
 
         // Preset display settings
-        projectm_set_preset_duration(_projectM, _projectMConfigView->getDouble("displayDuration", 30.0));
+        projectm_set_preset_duration(_projectM, EffectivePresetDuration(_projectMConfigView->getDouble("displayDuration", 30.0)));
         projectm_set_soft_cut_duration(_projectM, _projectMConfigView->getDouble("transitionDuration", 3.0));
         projectm_set_hard_cut_enabled(_projectM, _projectMConfigView->getBool("hardCutsEnabled", false));
         projectm_set_hard_cut_duration(_projectM, _projectMConfigView->getDouble("hardCutDuration", 20.0));
@@ -397,7 +407,7 @@ void ProjectMWrapper::OnConfigurationPropertyRemoved(const std::string& key)
 
     if (key == "projectM.displayDuration")
     {
-        projectm_set_preset_duration(_projectM, _projectMConfigView->getDouble("displayDuration", 30.0));
+        projectm_set_preset_duration(_projectM, EffectivePresetDuration(_projectMConfigView->getDouble("displayDuration", 30.0)));
     }
 
     if (key == "projectM.transitionDuration")
