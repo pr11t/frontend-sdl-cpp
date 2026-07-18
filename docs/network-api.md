@@ -407,8 +407,9 @@ Reset disables both mirrors and restores rotation `0` and zoom `1`.
 
 ## Configuration
 
-Live projectM settings (preset duration, shuffle, transitions, hard cuts,
-sensitivities, mesh size, FPS) can be read and changed at runtime.
+Live playback and window settings (preset duration, shuffle, transitions, hard
+cuts, sensitivities, mesh size, FPS, and fullscreen) can be read and changed at
+runtime.
 
 Changes are written to a dedicated runtime override layer that has **higher
 precedence than command-line flags and the user configuration**. A value set
@@ -433,6 +434,7 @@ layers. Updates are queued and applied on the render thread.
 | `meshX` | Integer `1`–`512` | Per-pixel mesh width. |
 | `meshY` | Integer `1`–`512` | Per-pixel mesh height. |
 | `fps` | Integer `1`–`1000` | Target FPS used for projectM timing. The window frame limiter may still require a restart. |
+| `fullscreen` | Boolean | Switch the window between fullscreen and windowed mode. |
 
 ### Read the schema
 

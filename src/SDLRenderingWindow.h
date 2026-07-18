@@ -141,8 +141,9 @@ protected:
      */
     void OnConfigurationPropertyRemoved(const std::string& key);
 
-    Poco::AutoPtr<Poco::Util::AbstractConfiguration> _userConfig; //!< View of the "projectM" configuration subkey in the "user" configuration.
-    Poco::AutoPtr<Poco::Util::AbstractConfiguration> _config; //!< View of the "window" configuration subkey.
+    Poco::AutoPtr<Poco::Util::AbstractConfiguration> _userConfig; //!< The "user" configuration layer (settings changed in the UI).
+    Poco::AutoPtr<Poco::Util::AbstractConfiguration> _runtimeConfig; //!< The highest-precedence runtime override layer (HTTP config API).
+    Poco::AutoPtr<Poco::Util::AbstractConfiguration> _config; //!< View of the "window" configuration subkey in the "effective" configuration.
 
     SDL_Window* _renderingWindow{ nullptr }; //!< Pointer to the SDL window used for rendering.
     SDL_GLContext _glContext{ nullptr }; //!< Pointer to the OpenGL context associated with the window.

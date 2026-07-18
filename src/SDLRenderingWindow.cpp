@@ -23,6 +23,7 @@ void SDLRenderingWindow::initialize(Poco::Util::Application& app)
 {
     auto& projectMSDLApp = dynamic_cast<ProjectMSDLApplication&>(app);
     _userConfig = projectMSDLApp.UserConfiguration();
+    _runtimeConfig = projectMSDLApp.RuntimeConfiguration();
     _config = app.config().createView("window");
 
     if (!_renderingWindow)
@@ -35,10 +36,17 @@ void SDLRenderingWindow::initialize(Poco::Util::Application& app)
     // Observe user configuration changes (set via the settings window)
     _userConfig->propertyChanged += Poco::delegate(this, &SDLRenderingWindow::OnConfigurationPropertyChanged);
     _userConfig->propertyRemoved += Poco::delegate(this, &SDLRenderingWindow::OnConfigurationPropertyRemoved);
+
+    // Observe runtime overrides (set via the HTTP config API). Applied on the
+    // render thread, which is the SDL window's thread.
+    _runtimeConfig->propertyChanged += Poco::delegate(this, &SDLRenderingWindow::OnConfigurationPropertyChanged);
+    _runtimeConfig->propertyRemoved += Poco::delegate(this, &SDLRenderingWindow::OnConfigurationPropertyRemoved);
 }
 
 void SDLRenderingWindow::uninitialize()
 {
+    _runtimeConfig->propertyRemoved -= Poco::delegate(this, &SDLRenderingWindow::OnConfigurationPropertyRemoved);
+    _runtimeConfig->propertyChanged -= Poco::delegate(this, &SDLRenderingWindow::OnConfigurationPropertyChanged);
     _userConfig->propertyRemoved -= Poco::delegate(this, &SDLRenderingWindow::OnConfigurationPropertyRemoved);
     _userConfig->propertyChanged -= Poco::delegate(this, &SDLRenderingWindow::OnConfigurationPropertyChanged);
     Poco::NotificationCenter::defaultCenter().removeObserver(_updateWindowTitleObserver);
@@ -456,5 +464,18 @@ void SDLRenderingWindow::OnConfigurationPropertyRemoved(const std::string& key)
     if (key == "window.displayPresetNameInTitle")
     {
         UpdateWindowTitle();
+    }
+
+    if (key == "window.fullscreen")
+    {
+        const bool desired = _config->getBool("fullscreen", false);
+        if (desired && !_fullscreen)
+        {
+            Fullscreen();
+        }
+        else if (!desired && _fullscreen)
+        {
+            Windowed();
+        }
     }
 }

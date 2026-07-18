@@ -257,6 +257,8 @@ const std::vector<ConfigOption>& ConfigOptions()
          "Per-pixel mesh height."},
         {"fps", "projectM.fps", ConfigType::Int, 1.0, 1000.0, 60.0,
          "Target FPS used for projectM timing. The window frame limiter may need a restart."},
+        {"fullscreen", "window.fullscreen", ConfigType::Bool, 0.0, 0.0, 0.0,
+         "Switch the window between fullscreen and windowed mode."},
     };
     return options;
 }
