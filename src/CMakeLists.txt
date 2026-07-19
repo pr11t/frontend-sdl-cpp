@@ -21,6 +21,8 @@ add_executable(projectMSDL WIN32 MACOSX_BUNDLE
         RenderLoop.h
         SDLRenderingWindow.cpp
         SDLRenderingWindow.h
+        VideoDeck.cpp
+        VideoDeck.h
         VisualPostProcessor.cpp
         VisualPostProcessor.h
         network/NetworkControlSubsystem.cpp
@@ -96,6 +98,19 @@ target_compile_definitions(projectMSDL
         PROJECTMSDL_VERSION="${PROJECT_VERSION}"
         )
 
+# POC: FFmpeg (from Homebrew) powers the video deck. Kept out of vcpkg on purpose
+# for a lean local build; resolved via find_path/find_library with brew hints.
+find_path(FFMPEG_INCLUDE_DIR libavcodec/avcodec.h
+        HINTS /opt/homebrew/opt/ffmpeg/include /usr/local/opt/ffmpeg/include /opt/homebrew/include /usr/local/include)
+find_library(FFMPEG_AVCODEC avcodec HINTS /opt/homebrew/opt/ffmpeg/lib /usr/local/opt/ffmpeg/lib)
+find_library(FFMPEG_AVFORMAT avformat HINTS /opt/homebrew/opt/ffmpeg/lib /usr/local/opt/ffmpeg/lib)
+find_library(FFMPEG_AVUTIL avutil HINTS /opt/homebrew/opt/ffmpeg/lib /usr/local/opt/ffmpeg/lib)
+find_library(FFMPEG_SWSCALE swscale HINTS /opt/homebrew/opt/ffmpeg/lib /usr/local/opt/ffmpeg/lib)
+if (NOT FFMPEG_INCLUDE_DIR OR NOT FFMPEG_AVCODEC OR NOT FFMPEG_AVFORMAT OR NOT FFMPEG_AVUTIL OR NOT FFMPEG_SWSCALE)
+    message(FATAL_ERROR "FFmpeg (avcodec/avformat/avutil/swscale) not found. Install it, e.g. 'brew install ffmpeg'.")
+endif ()
+target_include_directories(projectMSDL PRIVATE ${FFMPEG_INCLUDE_DIR})
+
 target_link_libraries(projectMSDL
         PRIVATE
         ProjectMSDL-GUI
@@ -107,6 +122,10 @@ target_link_libraries(projectMSDL
         SDL2::SDL2$<$<STREQUAL:${SDL2_LINKAGE},static>:-static>
         SDL2::SDL2main
         OpenGL::$<IF:$<BOOL:${ENABLE_GLES}>,GLES3,GL>
+        ${FFMPEG_AVFORMAT}
+        ${FFMPEG_AVCODEC}
+        ${FFMPEG_SWSCALE}
+        ${FFMPEG_AVUTIL}
         )
 
 if (MSVC)
@@ -114,4 +133,52 @@ if (MSVC)
             PROPERTIES
             VS_DPI_AWARE "PerMonitor"
             )
+endif ()
+
+# POC verification harness: exercises VideoDeck offscreen (no audio/projectM), so
+# the FFmpeg->GL render path can be checked without the app's CoreAudio init.
+add_executable(poc_video_test
+        VideoDeck.cpp
+        VideoDeck.h
+        poc_video_test.cpp
+        )
+target_include_directories(poc_video_test PRIVATE ${FFMPEG_INCLUDE_DIR} ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(poc_video_test
+        PRIVATE
+        Poco::Foundation
+        ${PROJECTMSDL_GLEW_TARGET}
+        SDL2::SDL2$<$<STREQUAL:${SDL2_LINKAGE},static>:-static>
+        SDL2::SDL2main
+        OpenGL::$<IF:$<BOOL:${ENABLE_GLES}>,GLES3,GL>
+        ${FFMPEG_AVFORMAT}
+        ${FFMPEG_AVCODEC}
+        ${FFMPEG_SWSCALE}
+        ${FFMPEG_AVUTIL}
+        )
+if (PROJECTMSDL_GLEW_TARGET)
+    target_compile_definitions(poc_video_test PRIVATE USE_GLEW)
+endif ()
+
+# POC demo: composite a projectM preset over the video deck, offscreen, to raw frames.
+add_executable(poc_demo
+        VideoDeck.cpp
+        VideoDeck.h
+        poc_demo.cpp
+        )
+target_include_directories(poc_demo PRIVATE ${FFMPEG_INCLUDE_DIR} ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(poc_demo
+        PRIVATE
+        Poco::Foundation
+        libprojectM::projectM
+        ${PROJECTMSDL_GLEW_TARGET}
+        SDL2::SDL2$<$<STREQUAL:${SDL2_LINKAGE},static>:-static>
+        SDL2::SDL2main
+        OpenGL::$<IF:$<BOOL:${ENABLE_GLES}>,GLES3,GL>
+        ${FFMPEG_AVFORMAT}
+        ${FFMPEG_AVCODEC}
+        ${FFMPEG_SWSCALE}
+        ${FFMPEG_AVUTIL}
+        )
+if (PROJECTMSDL_GLEW_TARGET)
+    target_compile_definitions(poc_demo PRIVATE USE_GLEW)
 endif ()

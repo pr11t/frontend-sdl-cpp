@@ -69,6 +69,29 @@ void RenderLoop::Run()
         }
     }
 
+    // POC: if a video path was supplied, decode it into a "video deck" and render
+    // it in place of projectM. Making it composite/look nice is a separate goal.
+    const std::string pocVideoPath =
+        Poco::Util::Application::instance().config().getString("poc.video", "");
+    if (!pocVideoPath.empty())
+    {
+        try
+        {
+            _videoDeck = std::make_unique<VideoDeck>(pocVideoPath);
+            _videoDeck->Initialize();
+        }
+        catch (const std::exception& ex)
+        {
+            poco_error_f1(_logger, "POC video disabled: %s", std::string(ex.what()));
+            _videoDeck.reset();
+        }
+    }
+
+    // POC verification: optionally dump one rendered frame to a PPM, then quit.
+    const std::string pocDumpPath =
+        Poco::Util::Application::instance().config().getString("poc.dumpFrame", "");
+    bool pocDumped = false;
+
     while (!_wantsToQuit)
     {
         limiter.TargetFPS(_projectMWrapper.TargetFPS());
@@ -78,7 +101,20 @@ void RenderLoop::Run()
         PollEvents();
         CheckViewportSize();
         _audioCapture.FillBuffer();
-        if (_visualPostProcessor.Active())
+        if (_videoDeck)
+        {
+            _videoDeck->Update(SDL_GetTicks());
+            _videoDeck->RenderToScreen(_renderWidth, _renderHeight);
+            // Dump on the first rendered frame, before the first buffer swap, so
+            // verification does not depend on the window being composited/visible.
+            if (!pocDumpPath.empty() && !pocDumped)
+            {
+                _videoDeck->DumpScreen(pocDumpPath, _renderWidth, _renderHeight);
+                pocDumped = true;
+                _wantsToQuit = true;
+            }
+        }
+        else if (_visualPostProcessor.Active())
         {
             // Render each extra deck into its own texture; deck 0 is rendered as
             // the compositor base inside VisualPostProcessor::Render.

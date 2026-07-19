@@ -3,6 +3,7 @@
 #include "AudioCapture.h"
 #include "ProjectMWrapper.h"
 #include "SDLRenderingWindow.h"
+#include "VideoDeck.h"
 #include "VisualPostProcessor.h"
 
 #include "notifications/QuitNotification.h"
@@ -11,6 +12,8 @@
 #include <Poco/Logger.h>
 #include <Poco/NObserver.h>
 #include <Poco/Notification.h>
+
+#include <memory>
 
 class ProjectMGUI;
 
@@ -84,6 +87,7 @@ protected:
     SDLRenderingWindow& _sdlRenderingWindow;
     NetworkControlSubsystem& _networkControl;
     VisualPostProcessor _visualPostProcessor;
+    std::unique_ptr<VideoDeck> _videoDeck; //!< POC: when set (--pocVideo), renders a video instead of projectM.
 
     projectm_handle _projectMHandle{nullptr};
     projectm_playlist_handle _playlistHandle{nullptr};

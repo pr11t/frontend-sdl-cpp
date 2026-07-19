@@ -152,6 +152,14 @@ void ProjectMSDLApplication::defineOptions(Poco::Util::OptionSet& options)
                              false, "<path>", true)
                           .binding("projectM.texturePath", _commandLineOverrides));
 
+    options.addOption(Option("pocVideo", "", "POC: decode this video file and render it on a deck instead of projectM.",
+                             false, "<path>", true)
+                          .binding("poc.video", _commandLineOverrides));
+
+    options.addOption(Option("pocDumpFrame", "", "POC: after ~2s, write one rendered frame to this PPM path and quit.",
+                             false, "<path>", true)
+                          .binding("poc.dumpFrame", _commandLineOverrides));
+
     options.addOption(Option("enableSplash", "s", "If true, initially displays the built-in projectM logo preset.",
                              false, "<0/1>", true)
                           .binding("projectM.enableSplash", _commandLineOverrides));
