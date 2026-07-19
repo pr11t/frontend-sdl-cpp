@@ -160,6 +160,10 @@ void ProjectMSDLApplication::defineOptions(Poco::Util::OptionSet& options)
                              false, "<path>", true)
                           .binding("poc.dumpFrame", _commandLineOverrides));
 
+    options.addOption(Option("pocOverlayPreset", "", "POC: with --pocVideo and post-processing, run this preset on deck 0 as an overlay composited over the video.",
+                             false, "<path>", true)
+                          .binding("poc.overlayPreset", _commandLineOverrides));
+
     options.addOption(Option("enableSplash", "s", "If true, initially displays the built-in projectM logo preset.",
                              false, "<0/1>", true)
                           .binding("projectM.enableSplash", _commandLineOverrides));

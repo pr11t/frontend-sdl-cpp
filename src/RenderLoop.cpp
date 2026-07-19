@@ -11,6 +11,7 @@
 #include <SDL2/SDL.h>
 
 #include "ProjectMSDLApplication.h"
+#include "network/ShaderChainStore.h"
 #include "network/TextureStore.h"
 
 #include <algorithm>
@@ -69,8 +70,7 @@ void RenderLoop::Run()
         }
     }
 
-    // POC: if a video path was supplied, decode it into a "video deck" and render
-    // it in place of projectM. Making it composite/look nice is a separate goal.
+    // POC: if a video path was supplied, decode it into a "video deck".
     const std::string pocVideoPath =
         Poco::Util::Application::instance().config().getString("poc.video", "");
     if (!pocVideoPath.empty())
@@ -87,10 +87,41 @@ void RenderLoop::Run()
         }
     }
 
-    // POC verification: optionally dump one rendered frame to a PPM, then quit.
-    const std::string pocDumpPath =
-        Poco::Util::Application::instance().config().getString("poc.dumpFrame", "");
-    bool pocDumped = false;
+    // POC two-deck overlay: deck 0 runs an overlay preset (e.g. an equalizer) as
+    // the compositor base; the video deck is exposed as the "video" texture and a
+    // composite shader pass draws the preset over it. Requires post-processing
+    // (--enableVisualPostProcessing).
+    if (_videoDeck && _visualPostProcessor.Active())
+    {
+        const std::string overlayPreset =
+            Poco::Util::Application::instance().config().getString("poc.overlayPreset", "");
+        if (!overlayPreset.empty())
+        {
+            std::string error;
+            if (!_projectMWrapper.LoadPresetFile(overlayPreset, false, error))
+            {
+                poco_error_f1(_logger, "POC overlay preset failed to load: %s", error);
+            }
+            projectm_set_preset_locked(_projectMWrapper.DeckAt(0).ProjectM(), true);
+        }
+
+        // uInput = deck 0 (overlay preset), uTexture = the video. Draw the video
+        // as a dimmed base with the preset added on top (video is v-flipped because
+        // its texture is stored top-row-first).
+        _networkControl.Shaders().SetShader("pocVideoComposite", std::string(
+            "uniform float videoLevel;\n"
+            "vec4 effect(vec2 uv){\n"
+            "  vec3 base = texture(uInput, uv).rgb;\n"
+            "  vec3 vid = texture(uTexture, vec2(uv.x, 1.0 - uv.y)).rgb;\n"
+            "  vec3 o = vid * videoLevel + base;\n"
+            "  return vec4(min(o, vec3(1.0)), 1.0);\n"
+            "}\n"));
+        ShaderPassConfig pass;
+        pass.shader = "pocVideoComposite";
+        pass.texture = "video";
+        pass.params["videoLevel"] = 0.7F;
+        _networkControl.Shaders().SetChain({pass});
+    }
 
     while (!_wantsToQuit)
     {
@@ -103,26 +134,21 @@ void RenderLoop::Run()
         _audioCapture.FillBuffer();
         if (_videoDeck)
         {
-            _videoDeck->Update(SDL_GetTicks());
-            _videoDeck->RenderToScreen(_renderWidth, _renderHeight);
-            // Dump on the first rendered frame, before the first buffer swap, so
-            // verification does not depend on the window being composited/visible.
-            if (!pocDumpPath.empty() && !pocDumped)
-            {
-                _videoDeck->DumpScreen(pocDumpPath, _renderWidth, _renderHeight);
-                pocDumped = true;
-                _wantsToQuit = true;
-            }
+            _videoDeck->Update(SDL_GetTicks()); // decode -> "video" texture each frame
         }
-        else if (_visualPostProcessor.Active())
+        if (_visualPostProcessor.Active())
         {
-            // Render each extra deck into its own texture; deck 0 is rendered as
-            // the compositor base inside VisualPostProcessor::Render.
+            // Render each extra projectM deck into its own texture; deck 0 is
+            // rendered as the compositor base inside VisualPostProcessor::Render.
             std::map<std::string, std::uint32_t> deckTextures;
             for (std::size_t deck = 1; deck < _projectMWrapper.DeckCount(); ++deck)
             {
                 deckTextures["deck" + std::to_string(deck)] =
                     _projectMWrapper.DeckAt(deck).RenderToTexture();
+            }
+            if (_videoDeck)
+            {
+                deckTextures["video"] = _videoDeck->Texture();
             }
 
             PostProcessInputs inputs;
@@ -133,6 +159,10 @@ void RenderLoop::Run()
                                         _networkControl.Textures(),
                                         inputs,
                                         deckTextures);
+        }
+        else if (_videoDeck)
+        {
+            _videoDeck->RenderToScreen(_renderWidth, _renderHeight); // no post-processing: video only
         }
         else
         {
