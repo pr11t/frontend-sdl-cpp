@@ -271,6 +271,13 @@ void ProjectMSDLApplication::defineOptions(Poco::Util::OptionSet& options)
                              "composited through the post-processing shader chain as deck1, deck2, ...",
                              false, "<number>", true)
                           .binding("visual.decks", _commandLineOverrides));
+
+    options.addOption(Option("renderScale", "",
+                             "Internal render scale in (0,1] applied under post-processing. Decks and "
+                             "compositor buffers render at drawable*scale; the final pass upscales. "
+                             "Lower values (e.g. 0.5) improve performance on high-DPI displays.",
+                             false, "<scale>", true)
+                          .binding("visual.renderScale", _commandLineOverrides));
 }
 
 int ProjectMSDLApplication::main(POCO_UNUSED const std::vector<std::string>& args)

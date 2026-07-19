@@ -128,6 +128,45 @@ Returns the deck count and each deck's current preset:
 curl -s http://127.0.0.1:8080/api/v1/decks
 ```
 
+### Performance tuning
+
+Each deck is a full projectM instance, so two decks cost roughly twice the GPU of
+one, and everything renders at the window's drawable size — which is **2× the
+logical size on a high-DPI/Retina display**. Three launch-time levers reduce that:
+
+- **`--renderScale <0..1>`** (config `visual.renderScale`, default `1.0`): under
+  post-processing, decks and the offscreen compositor buffers render at
+  `drawable × scale` and the final pass upscales to the window. `0.5` quarters the
+  pixel work — the single biggest lever on Retina — at the cost of some sharpness.
+  Only applies when post-processing is enabled.
+- **Per-deck mesh** (config `projectM.deck<i>.meshX` / `.meshY`): overrides the
+  global `projectM.meshX/meshY` for one deck. A preset that does no per-pixel warp
+  (a spectrum analyzer, a static overlay) gains nothing from a fine mesh — drop it
+  to e.g. `8×8` to slash per-pixel work with no visible change, while another deck
+  keeps a full mesh.
+- **Global mesh** (`projectM.meshX/meshY`, also live via `PATCH /api/v1/config`):
+  lower it if no deck needs fine per-pixel motion.
+
+Example — two decks at half resolution:
+
+```sh
+projectMSDL --decks 2 --enableVisualPostProcessing --renderScale 0.5
+```
+
+Per-deck mesh is set in the config file (`projectMSDL.properties`), since it is
+per-instance rather than a command-line flag:
+
+```properties
+projectM.meshX = 96
+projectM.meshY = 54
+projectM.deck0.meshX = 8   # analyzer deck: no per-pixel warp, tiny mesh
+projectM.deck0.meshY = 8
+```
+
+When the compositor's transform (mirror/rotation/zoom) is left at its defaults, the
+built-in transform pass is skipped automatically, so an identity setup costs only
+your own chain passes.
+
 ## Playback
 
 ### Current preset
@@ -910,6 +949,41 @@ Load a different preset onto deck 1 to change what is blended in:
 curl -s -X POST -H 'Content-Type: application/json' -d '{}' \
   'http://127.0.0.1:8080/api/v1/playback/random?deck=1'
 ```
+
+### Render once, view twice (single-deck mirror)
+
+Two decks make sense for two **different** presets. If you instead want the *same*
+preset shown twice — e.g. one copy rising, a mirrored copy descending — do **not**
+use a second deck: two independent projectM instances each run their own audio
+auto-gain and frame timing, so identical audio yields subtly different visuals,
+and you pay for a second full render. Render **one** deck and derive the mirror in
+the shader, sampling the base with a flipped Y. It is guaranteed identical and
+half the cost:
+
+```glsl
+// vertical-mirror: overlay the base with a top-to-bottom flipped copy of itself.
+vec4 effect(vec2 uv)
+{
+    vec4 base     = texture(uInput, uv);
+    vec4 mirrored = texture(uInput, vec2(uv.x, 1.0 - uv.y));
+    return max(base, mirrored);
+}
+```
+
+```sh
+projectMSDL --decks 1 --enableVisualPostProcessing
+
+curl -s -X PUT --data-binary \
+  'vec4 effect(vec2 uv){return max(texture(uInput,uv),texture(uInput,vec2(uv.x,1.0-uv.y)));}' \
+  http://127.0.0.1:8080/api/v1/shaders/vertical-mirror
+
+curl -s -X PUT -H 'Content-Type: application/json' \
+  -d '{"chain":[{"shader":"vertical-mirror"}]}' \
+  http://127.0.0.1:8080/api/v1/postprocess
+```
+
+Rule of thumb: **two decks for two different presets; one deck plus a shader view
+when both layers are the same source.**
 
 > [!NOTE]
 > The chain only renders when post-processing is enabled at launch

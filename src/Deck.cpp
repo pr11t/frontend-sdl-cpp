@@ -67,9 +67,19 @@ void Deck::Initialize(int width, int height,
         fps = 60;
     }
 
+    // Resolve the per-pixel mesh once. A deck may override the global mesh with
+    // "projectM.deck<index>.meshX/Y" -- useful to give a non-warping preset (e.g.
+    // a spectrum analyzer) a tiny mesh while another deck keeps a full one.
+    const int globalMeshX = _config->getInt("meshX", 48);
+    const int globalMeshY = _config->getInt("meshY", 32);
+    const std::string deckPrefix = "deck" + std::to_string(_index) + ".";
+    _meshX = _config->getInt(deckPrefix + "meshX", globalMeshX);
+    _meshY = _config->getInt(deckPrefix + "meshY", globalMeshY);
+    _meshOverridden = _config->has(deckPrefix + "meshX") || _config->has(deckPrefix + "meshY");
+
     projectm_set_window_size(_projectM, width, height);
     projectm_set_fps(_projectM, fps);
-    projectm_set_mesh_size(_projectM, _config->getInt("meshX", 48), _config->getInt("meshY", 32));
+    projectm_set_mesh_size(_projectM, _meshX, _meshY);
     projectm_set_aspect_correction(_projectM, _config->getBool("aspectCorrectionEnabled", true));
     projectm_set_preset_locked(_projectM, _config->getBool("presetLocked", false));
 
@@ -177,10 +187,10 @@ void Deck::RenderToScreen()
     size_t currentMeshX{0};
     size_t currentMeshY{0};
     projectm_get_mesh_size(_projectM, &currentMeshX, &currentMeshY);
-    if (currentMeshX != static_cast<size_t>(_config->getInt("meshX", 220)) ||
-        currentMeshY != static_cast<size_t>(_config->getInt("meshY", 125)))
+    if (currentMeshX != static_cast<size_t>(_meshX) ||
+        currentMeshY != static_cast<size_t>(_meshY))
     {
-        projectm_set_mesh_size(_projectM, _config->getInt("meshX", 220), _config->getInt("meshY", 125));
+        projectm_set_mesh_size(_projectM, _meshX, _meshY);
     }
 
     projectm_opengl_render_frame(_projectM);
@@ -341,7 +351,13 @@ void Deck::ApplyConfigKey(const std::string& key)
     }
     if (key == "projectM.meshX" || key == "projectM.meshY")
     {
-        projectm_set_mesh_size(_projectM, _config->getUInt64("meshX", 48), _config->getUInt64("meshY", 32));
+        // A deck with its own mesh override ignores global mesh changes.
+        if (!_meshOverridden)
+        {
+            _meshX = _config->getInt("meshX", 48);
+            _meshY = _config->getInt("meshY", 32);
+            projectm_set_mesh_size(_projectM, _meshX, _meshY);
+        }
     }
 }
 

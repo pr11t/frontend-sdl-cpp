@@ -13,6 +13,7 @@
 #include "ProjectMSDLApplication.h"
 #include "network/TextureStore.h"
 
+#include <algorithm>
 #include <map>
 #include <string>
 
@@ -26,6 +27,10 @@ RenderLoop::RenderLoop()
     , _projectMGui(Poco::Util::Application::instance().getSubsystem<ProjectMGUI>())
     , _userConfig(ProjectMSDLApplication::instance().UserConfiguration())
 {
+    _renderScale = static_cast<float>(
+        Poco::Util::Application::instance().config().getDouble("visual.renderScale", 1.0));
+    _renderScale = std::min(1.0F, std::max(0.05F, _renderScale));
+
     // Serve named in-memory textures (e.g. album art) to presets, per deck. The
     // callback runs on this (render) thread, reading the network subsystem's store.
     for (std::size_t deck = 0; deck < _projectMWrapper.DeckCount(); ++deck)
@@ -50,10 +55,18 @@ void RenderLoop::Run()
         _networkControl.Playback().SetCurrentPresetFile(deck, _projectMWrapper.CurrentPresetFile(deck));
     }
     CheckViewportSize();
-    if (_networkControl.Visuals().Get().enabled &&
-        !_visualPostProcessor.Initialize(_renderWidth, _renderHeight))
+    if (_networkControl.Visuals().Get().enabled)
     {
-        _networkControl.Visuals().SetEnabled(false);
+        if (!_visualPostProcessor.Initialize(_renderWidth, _renderHeight, _renderScale))
+        {
+            _networkControl.Visuals().SetEnabled(false);
+        }
+        else
+        {
+            // Now that post-processing is active, resize the decks down to its
+            // internal (scaled) resolution.
+            CheckViewportSize();
+        }
     }
 
     while (!_wantsToQuit)
@@ -358,24 +371,42 @@ void RenderLoop::CheckViewportSize()
     int renderHeight;
     _sdlRenderingWindow.GetDrawableSize(renderWidth, renderHeight);
 
+    // Output (window drawable) size changed: update the GUI and the post-processor,
+    // which owns the final on-screen resolution.
     if (renderWidth != _renderWidth || renderHeight != _renderHeight)
     {
-        for (std::size_t deck = 0; deck < _projectMWrapper.DeckCount(); ++deck)
-        {
-            _projectMWrapper.DeckAt(deck).Resize(renderWidth, renderHeight);
-        }
         _renderWidth = renderWidth;
         _renderHeight = renderHeight;
 
         _projectMGui.UpdateFontSize();
 
         if (_visualPostProcessor.Active() &&
-            !_visualPostProcessor.Resize(renderWidth, renderHeight))
+            !_visualPostProcessor.Resize(renderWidth, renderHeight, _renderScale))
         {
             _networkControl.Visuals().SetEnabled(false);
         }
 
         poco_debug_f2(_logger, "Resized rendering canvas to %?dx%?d.", renderWidth, renderHeight);
+    }
+
+    // Decks render at the post-processor's internal (scaled) resolution when it is
+    // active, otherwise straight at the drawable size. Matching the post-processor's
+    // exact dimensions keeps deck textures aligned with the compositor buffers.
+    int deckWidth = renderWidth;
+    int deckHeight = renderHeight;
+    if (_visualPostProcessor.Active())
+    {
+        deckWidth = _visualPostProcessor.RenderWidth();
+        deckHeight = _visualPostProcessor.RenderHeight();
+    }
+    if (deckWidth != _deckWidth || deckHeight != _deckHeight)
+    {
+        for (std::size_t deck = 0; deck < _projectMWrapper.DeckCount(); ++deck)
+        {
+            _projectMWrapper.DeckAt(deck).Resize(deckWidth, deckHeight);
+        }
+        _deckWidth = deckWidth;
+        _deckHeight = deckHeight;
     }
 }
 

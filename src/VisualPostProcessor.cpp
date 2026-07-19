@@ -18,6 +18,7 @@
 #endif
 
 #include <algorithm>
+#include <cmath>
 #include <stdexcept>
 #include <vector>
 
@@ -105,12 +106,25 @@ VisualPostProcessor::~VisualPostProcessor()
     Shutdown();
 }
 
-bool VisualPostProcessor::Initialize(int width, int height)
+namespace {
+// Clamps the render scale and converts an output dimension to an internal one.
+int ScaledDimension(int outputDimension, float scale)
+{
+    return std::max(1, static_cast<int>(std::lround(outputDimension * scale)));
+}
+} // namespace
+
+bool VisualPostProcessor::Initialize(int outputWidth, int outputHeight, float renderScale)
 {
     if (_active)
     {
         return true;
     }
+    _renderScale = std::min(1.0F, std::max(0.05F, renderScale));
+    _outputWidth = outputWidth;
+    _outputHeight = outputHeight;
+    const int width = ScaledDimension(outputWidth, _renderScale);
+    const int height = ScaledDimension(outputHeight, _renderScale);
     try
     {
         std::uint32_t vertexShader = 0;
@@ -155,7 +169,9 @@ bool VisualPostProcessor::Initialize(int width, int height)
             throw std::runtime_error("Post-processing framebuffer is incomplete.");
         }
         _active = true;
-        poco_information_f2(_logger, "Visual post-processing enabled at %?dx%?d.", width, height);
+        poco_information_f4(_logger,
+                            "Visual post-processing enabled: output %?dx%?d, internal render %?dx%?d.",
+                            _outputWidth, _outputHeight, width, height);
         return true;
     }
     catch (const std::exception& error)
@@ -168,9 +184,18 @@ bool VisualPostProcessor::Initialize(int width, int height)
     }
 }
 
-bool VisualPostProcessor::Resize(int width, int height)
+bool VisualPostProcessor::Resize(int outputWidth, int outputHeight, float renderScale)
 {
-    if (!_active || (width == _width && height == _height))
+    if (!_active)
+    {
+        return true;
+    }
+    _renderScale = std::min(1.0F, std::max(0.05F, renderScale));
+    _outputWidth = outputWidth;
+    _outputHeight = outputHeight;
+    const int width = ScaledDimension(outputWidth, _renderScale);
+    const int height = ScaledDimension(outputHeight, _renderScale);
+    if (width == _width && height == _height)
     {
         return true;
     }
@@ -302,13 +327,22 @@ void VisualPostProcessor::Render(ProjectMWrapper& projectM, const VisualState& s
     glDisable(GL_SCISSOR_TEST);
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 
-    // Pass 0 is the built-in transform; passes 1..N are user shaders. Ping-pong
-    // between framebuffers A and B; the final pass renders to the screen.
-    const std::size_t totalPasses = 1 + _passes.size();
+    // Pass 0 is the built-in transform (mirror/rotation/zoom); passes 1..N are
+    // user shaders. When the transform is an identity (no mirror, zoom 1, no
+    // rotation) and at least one user pass will render to the screen, skip it --
+    // it would be a full-screen copy doing nothing. Ping-pong between framebuffers
+    // A and B; the final pass renders to the screen.
+    const bool identityTransform =
+        !state.mirrorX && !state.mirrorY &&
+        std::abs(state.zoom - 1.0) < 1.0e-4 &&
+        std::abs(state.rotationDegrees) < 1.0e-4;
+    const bool runTransform = !identityTransform || _passes.empty();
+    const std::size_t totalPasses = (runTransform ? 1u : 0u) + _passes.size();
     GLuint readTexture = _texture;
     for (std::size_t i = 0; i < totalPasses; ++i)
     {
         const bool last = (i + 1 == totalPasses);
+        const bool isTransform = runTransform && i == 0;
         GLuint targetFramebuffer = 0;
         GLuint nextTexture = 0;
         if (!last)
@@ -325,12 +359,17 @@ void VisualPostProcessor::Render(ProjectMWrapper& projectM, const VisualState& s
             }
         }
 
+        // Intermediate passes render at the internal (scaled) size; the final
+        // pass renders at the full output size, upscaling the internal texture.
+        const int passWidth = last ? _outputWidth : _width;
+        const int passHeight = last ? _outputHeight : _height;
+
         glBindFramebuffer(GL_FRAMEBUFFER, targetFramebuffer);
-        glViewport(0, 0, _width, _height);
+        glViewport(0, 0, passWidth, passHeight);
         glClearColor(0.0F, 0.0F, 0.0F, 1.0F);
         glClear(GL_COLOR_BUFFER_BIT);
 
-        if (i == 0)
+        if (isTransform)
         {
             glUseProgram(_program);
             glUniform1i(_mirrorXLocation, state.mirrorX ? 1 : 0);
@@ -343,7 +382,8 @@ void VisualPostProcessor::Render(ProjectMWrapper& projectM, const VisualState& s
         }
         else
         {
-            const UserPass& pass = _passes[i - 1];
+            const std::size_t userIndex = runTransform ? i - 1 : i;
+            const UserPass& pass = _passes[userIndex];
             glUseProgram(pass.program);
             glActiveTexture(GL_TEXTURE0);
             glBindTexture(GL_TEXTURE_2D, readTexture);
@@ -372,7 +412,7 @@ void VisualPostProcessor::Render(ProjectMWrapper& projectM, const VisualState& s
 
             if (pass.resolutionLocation >= 0)
             {
-                glUniform2f(pass.resolutionLocation, static_cast<float>(_width), static_cast<float>(_height));
+                glUniform2f(pass.resolutionLocation, static_cast<float>(passWidth), static_cast<float>(passHeight));
             }
             if (pass.timeLocation >= 0) { glUniform1f(pass.timeLocation, inputs.time); }
             for (const auto& param : pass.params)

@@ -65,6 +65,12 @@ visual.postProcessingEnabled = false
 # visual.postProcessingEnabled.
 visual.decks = 1
 
+# Internal render scale in (0,1], applied when post-processing is enabled. Decks
+# and the offscreen compositor buffers render at drawable*scale and the final
+# pass upscales to the window. Lowering this (e.g. 0.5) is the biggest perf lever
+# on high-DPI/Retina displays, at the cost of some sharpness.
+visual.renderScale = 1.0
+
 ### projectM settings
 
 # Default path where projectMSDL will search for presets and textures. The directory will be searched recursively.

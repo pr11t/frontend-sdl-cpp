@@ -96,8 +96,11 @@ protected:
 
     bool _mouseDown{false}; //!< Left mouse button is pressed
 
-    int _renderWidth{0};
-    int _renderHeight{0};
+    int _renderWidth{0};   //!< Window drawable (output) width.
+    int _renderHeight{0};  //!< Window drawable (output) height.
+    int _deckWidth{0};     //!< Internal size decks currently render at (scaled when post-processing).
+    int _deckHeight{0};
+    float _renderScale{1.0F}; //!< visual.renderScale: decks render at drawable*scale under post-processing.
 
     ModifierKeyStates _keyStates; //!< Current "pressed" states of modifier keys
 

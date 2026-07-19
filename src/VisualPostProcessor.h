@@ -33,8 +33,18 @@ public:
     VisualPostProcessor() = default;
     ~VisualPostProcessor();
 
-    bool Initialize(int width, int height);
-    bool Resize(int width, int height);
+    /**
+     * @param outputWidth,outputHeight  Final on-screen size (the window drawable).
+     * @param renderScale               Internal render scale in (0,1]; offscreen
+     *                                  buffers and decks render at output*scale and
+     *                                  the last pass upscales to the output size.
+     */
+    bool Initialize(int outputWidth, int outputHeight, float renderScale);
+    bool Resize(int outputWidth, int outputHeight, float renderScale);
+
+    /// Internal (scaled) render dimensions decks must match. Valid once active.
+    int RenderWidth() const { return _width; }
+    int RenderHeight() const { return _height; }
     void Render(ProjectMWrapper& projectM, const VisualState& state,
                 ShaderChainStore& shaders, TextureStore& textures,
                 const PostProcessInputs& inputs,
@@ -87,8 +97,11 @@ private:
     int _rotationLocation{-1};
     int _zoomLocation{-1};
     int _outputSizeLocation{-1};
-    int _width{0};
-    int _height{0};
+    int _width{0};             //!< Internal (scaled) render width.
+    int _height{0};            //!< Internal (scaled) render height.
+    int _outputWidth{0};       //!< Final on-screen width (the last pass upscales to this).
+    int _outputHeight{0};      //!< Final on-screen height.
+    float _renderScale{1.0F};  //!< Internal render scale in (0,1].
     bool _active{false};
 
     std::vector<UserPass> _passes;

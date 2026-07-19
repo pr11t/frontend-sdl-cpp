@@ -77,5 +77,8 @@ private:
     std::uint32_t _texture{0};
     int _width{0};
     int _height{0};
+    int _meshX{48};              //!< Resolved per-pixel mesh width (per-deck override or global).
+    int _meshY{32};              //!< Resolved per-pixel mesh height.
+    bool _meshOverridden{false}; //!< True when this deck sets its own mesh, so global changes don't clobber it.
     Poco::Logger& _logger{Poco::Logger::get("Deck")};
 };
