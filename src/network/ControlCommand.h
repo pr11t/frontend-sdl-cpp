@@ -32,4 +32,5 @@ struct ControlCommand
     std::string configKey;   //!< Full config key for SetConfig, e.g. "projectM.displayDuration".
     std::string configValue; //!< Canonical string value for SetConfig, applied on the render thread.
     ToastOptions toast;      //!< Options for ShowToast.
+    std::uint32_t deckIndex{0}; //!< Target deck for preset/playback commands.
 };

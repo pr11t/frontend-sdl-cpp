@@ -42,9 +42,9 @@ std::map<int, std::string> AudioCaptureImpl::AudioDeviceList()
     return deviceList;
 }
 
-void AudioCaptureImpl::StartRecording(projectm* projectMHandle, int audioDeviceIndex)
+void AudioCaptureImpl::StartRecording(std::vector<projectm*> projectMHandles, int audioDeviceIndex)
 {
-    _projectMHandle = projectMHandle;
+    _projectMHandles = std::move(projectMHandles);
     _currentAudioDeviceIndex = audioDeviceIndex;
 
     _isCapturing = true;
@@ -74,7 +74,7 @@ void AudioCaptureImpl::NextAudioDevice()
     // Will wrap around to loopback capture device (-1).
     int nextAudioDeviceId = ((_currentAudioDeviceIndex + 2) % (static_cast<int>(captureDevices.size()) + 1)) - 1;
 
-    StartRecording(_projectMHandle, nextAudioDeviceId);
+    StartRecording(_projectMHandles, nextAudioDeviceId);
 }
 
 void AudioCaptureImpl::AudioDeviceIndex(int index)
@@ -87,7 +87,7 @@ void AudioCaptureImpl::AudioDeviceIndex(int index)
     {
         _currentAudioDeviceIndex = index;
         StopRecording();
-        StartRecording(_projectMHandle, index);
+        StartRecording(_projectMHandles, index);
     }
 }
 
@@ -447,7 +447,11 @@ void AudioCaptureImpl::CaptureThread()
 
                 if (framesAvailable > 0 && data != nullptr)
                 {
-                    projectm_pcm_add_float(_projectMHandle, reinterpret_cast<float*>(data), framesAvailable, static_cast<projectm_channels>(_channels));
+                    // Fan the same PCM data out to every deck.
+                    for (auto* handle : _projectMHandles)
+                    {
+                        projectm_pcm_add_float(handle, reinterpret_cast<float*>(data), framesAvailable, static_cast<projectm_channels>(_channels));
+                    }
                 }
 
                 _audioCaptureClient->ReleaseBuffer(framesAvailable);

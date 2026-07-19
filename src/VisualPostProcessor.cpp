@@ -279,7 +279,8 @@ void VisualPostProcessor::SyncChain(ShaderChainStore& shaders)
 
 void VisualPostProcessor::Render(ProjectMWrapper& projectM, const VisualState& state,
                                  ShaderChainStore& shaders, TextureStore& textures,
-                                 const PostProcessInputs& inputs)
+                                 const PostProcessInputs& inputs,
+                                 const std::map<std::string, std::uint32_t>& deckTextures)
 {
     // 1. Render projectM into framebuffer A.
     glBindFramebuffer(GL_FRAMEBUFFER, _framebuffer);
@@ -352,8 +353,19 @@ void VisualPostProcessor::Render(ProjectMWrapper& projectM, const VisualState& s
             GLuint boundTexture = _fallbackTexture;
             if (!pass.textureName.empty())
             {
-                const GLuint named = NamedGLTexture(textures, pass.textureName);
-                if (named != 0) { boundTexture = named; }
+                // A reserved deck name ("deck1", ...) resolves to that deck's live
+                // FBO texture, which the deck owns -- it must NOT go through the
+                // TextureStore CPU-upload cache (nor be deleted by ClearTextureCache).
+                const auto deck = deckTextures.find(pass.textureName);
+                if (deck != deckTextures.end() && deck->second != 0)
+                {
+                    boundTexture = deck->second;
+                }
+                else
+                {
+                    const GLuint named = NamedGLTexture(textures, pass.textureName);
+                    if (named != 0) { boundTexture = named; }
+                }
             }
             glBindTexture(GL_TEXTURE_2D, boundTexture);
             if (pass.textureLocation >= 0) { glUniform1i(pass.textureLocation, 1); }

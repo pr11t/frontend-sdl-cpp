@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <exception>
 #include <sstream>
 #include <string>
@@ -322,6 +323,28 @@ std::string QueryValue(const Poco::URI& uri, const std::string& key, const std::
         }
     }
     return fallback;
+}
+
+// Resolves the ?deck=N query parameter (default 0) against the number of decks.
+// Writes a 400/404 error response and returns false on a bad or out-of-range value.
+bool ParseDeck(const Poco::URI& uri, std::size_t deckCount, std::uint32_t& deck,
+               Poco::Net::HTTPServerResponse& response)
+{
+    unsigned int value = 0;
+    if (!Poco::NumberParser::tryParseUnsigned(QueryValue(uri, "deck", "0"), value))
+    {
+        WriteError(response, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
+                   "invalid_deck", "deck must be an unsigned integer.");
+        return false;
+    }
+    if (value >= deckCount)
+    {
+        WriteError(response, Poco::Net::HTTPResponse::HTTP_NOT_FOUND,
+                   "deck_not_found", "No deck with that index exists.");
+        return false;
+    }
+    deck = value;
+    return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -1295,15 +1318,47 @@ void ApiRequestHandler::handleRequest(Poco::Net::HTTPServerRequest& request,
             return WriteJson(response, Poco::Net::HTTPResponse::HTTP_ACCEPTED, result);
         }
 
+        if (path == "/api/v1/decks")
+        {
+            if (method != "GET")
+            {
+                return MethodNotAllowed(response, "GET");
+            }
+            Poco::JSON::Array decks;
+            for (std::size_t index = 0; index < _playback.DeckCount(); ++index)
+            {
+                const auto playback = _playback.Get(index);
+                Poco::JSON::Object current;
+                current.set("name", playback.presetName);
+                current.set("id", playback.presetId);
+                current.set("fileBacked", playback.fileBacked);
+                Poco::JSON::Object entry;
+                entry.set("index", static_cast<int>(index));
+                entry.set("current", current);
+                decks.add(entry);
+            }
+            Poco::JSON::Object result;
+            result.set("ok", true);
+            result.set("count", static_cast<int>(_playback.DeckCount()));
+            result.set("decks", decks);
+            return WriteJson(response, Poco::Net::HTTPResponse::HTTP_OK, result);
+        }
+
         if (path == "/api/v1/playback/current")
         {
             if (method != "GET")
             {
                 return MethodNotAllowed(response, "GET");
             }
-            const auto playback = _playback.Get();
+            std::uint32_t deck = 0;
+            if (!ParseDeck(uri, _playback.DeckCount(), deck, response))
+            {
+                return;
+            }
+            const auto playback = _playback.Get(deck);
             Poco::JSON::Object result;
             result.set("ok", true);
+            result.set("deck", static_cast<int>(deck));
             result.set("name", playback.presetName);
             result.set("id", playback.presetId);
             result.set("fileBacked", playback.fileBacked);
@@ -1317,6 +1372,11 @@ void ApiRequestHandler::handleRequest(Poco::Net::HTTPServerRequest& request,
             if (method != "POST")
             {
                 return MethodNotAllowed(response, "POST");
+            }
+            std::uint32_t deck = 0;
+            if (!ParseDeck(uri, _playback.DeckCount(), deck, response))
+            {
+                return;
             }
             std::string body;
             if (!ReadBody(request, response, controlBodyLimit, body))
@@ -1345,7 +1405,11 @@ void ApiRequestHandler::handleRequest(Poco::Net::HTTPServerRequest& request,
                 type = ControlCommandType::RandomPreset;
                 commandName = "random";
             }
-            if (!_commands.TryEnqueue({type, smooth, 0, ""}))
+            ControlCommand command;
+            command.type = type;
+            command.smoothTransition = smooth;
+            command.deckIndex = deck;
+            if (!_commands.TryEnqueue(command))
             {
                 return WriteError(response, Poco::Net::HTTPResponse::HTTP_SERVICE_UNAVAILABLE,
                                   "queue_full", "The remote-control command queue is full.");
@@ -1353,6 +1417,7 @@ void ApiRequestHandler::handleRequest(Poco::Net::HTTPServerRequest& request,
             Poco::JSON::Object result;
             result.set("ok", true);
             result.set("command", commandName);
+            result.set("deck", static_cast<int>(deck));
             result.set("queued", true);
             return WriteJson(response, Poco::Net::HTTPResponse::HTTP_ACCEPTED, result);
         }
@@ -1440,6 +1505,11 @@ void ApiRequestHandler::handleRequest(Poco::Net::HTTPServerRequest& request,
             {
                 return MethodNotAllowed(response, expectedMethod);
             }
+            std::uint32_t deck = 0;
+            if (!ParseDeck(uri, _playback.DeckCount(), deck, response))
+            {
+                return;
+            }
             std::string body;
             if (!ReadBody(request, response, _presets.MaxPresetBytes() + controlBodyLimit, body))
             {
@@ -1466,7 +1536,13 @@ void ApiRequestHandler::handleRequest(Poco::Net::HTTPServerRequest& request,
                                      ? object->getValue<std::string>("source")
                                      : std::string();
             const auto jobId = _jobs.Create(operation);
-            if (!_commands.TryEnqueue({type, smooth, jobId, payload}))
+            ControlCommand command;
+            command.type = type;
+            command.smoothTransition = smooth;
+            command.jobId = jobId;
+            command.payload = payload;
+            command.deckIndex = deck;
+            if (!_commands.TryEnqueue(command))
             {
                 _jobs.Complete(jobId, false, "The remote-control command queue is full.");
                 return WriteError(response, Poco::Net::HTTPResponse::HTTP_SERVICE_UNAVAILABLE,
@@ -1475,6 +1551,7 @@ void ApiRequestHandler::handleRequest(Poco::Net::HTTPServerRequest& request,
             Poco::JSON::Object result;
             result.set("ok", true);
             result.set("jobId", jobId);
+            result.set("deck", static_cast<int>(deck));
             result.set("state", "queued");
             return WriteJson(response, Poco::Net::HTTPResponse::HTTP_ACCEPTED, result);
         }
@@ -1498,6 +1575,11 @@ void ApiRequestHandler::handleRequest(Poco::Net::HTTPServerRequest& request,
                 {
                     return MethodNotAllowed(response, "POST");
                 }
+                std::uint32_t deck = 0;
+                if (!ParseDeck(uri, _playback.DeckCount(), deck, response))
+                {
+                    return;
+                }
                 std::string body;
                 if (!ReadBody(request, response, controlBodyLimit, body))
                 {
@@ -1514,8 +1596,13 @@ void ApiRequestHandler::handleRequest(Poco::Net::HTTPServerRequest& request,
                     return;
                 }
                 const auto jobId = _jobs.Create("load_preset");
-                if (!_commands.TryEnqueue(
-                        {ControlCommandType::LoadPresetFile, smooth, jobId, _presets.ResolvePath(id)}))
+                ControlCommand command;
+                command.type = ControlCommandType::LoadPresetFile;
+                command.smoothTransition = smooth;
+                command.jobId = jobId;
+                command.payload = _presets.ResolvePath(id);
+                command.deckIndex = deck;
+                if (!_commands.TryEnqueue(command))
                 {
                     _jobs.Complete(jobId, false, "The remote-control command queue is full.");
                     return WriteError(response, Poco::Net::HTTPResponse::HTTP_SERVICE_UNAVAILABLE,
@@ -1524,6 +1611,7 @@ void ApiRequestHandler::handleRequest(Poco::Net::HTTPServerRequest& request,
                 Poco::JSON::Object result;
                 result.set("ok", true);
                 result.set("jobId", jobId);
+                result.set("deck", static_cast<int>(deck));
                 result.set("state", "queued");
                 return WriteJson(response, Poco::Net::HTTPResponse::HTTP_ACCEPTED, result);
             }

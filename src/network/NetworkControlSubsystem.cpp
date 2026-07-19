@@ -7,6 +7,7 @@
 #include <Poco/Util/AbstractConfiguration.h>
 #include <Poco/Util/Application.h>
 
+#include <algorithm>
 #include <limits>
 #include <memory>
 #include <stdexcept>
@@ -57,6 +58,13 @@ ShaderChainStore& NetworkControlSubsystem::Shaders()
 void NetworkControlSubsystem::initialize(Poco::Util::Application& app)
 {
     _visuals.SetEnabled(app.config().getBool("visual.postProcessingEnabled", false));
+
+    // Mirror ProjectMWrapper's deck clamp so ?deck=N is validated against the
+    // same range the render side created.
+    constexpr int maxDecks = 4;
+    int deckCount = app.config().getInt("visual.decks", 1);
+    deckCount = std::max(1, std::min(deckCount, maxDecks));
+    _playback.SetDeckCount(static_cast<std::size_t>(deckCount));
 
     if (!app.config().getBool("network.enabled", true))
     {

@@ -9,6 +9,8 @@ configure_file(resources/projectMSDL.properties.in "${PROJECTM_CONFIGURATION_FIL
 add_executable(projectMSDL WIN32 MACOSX_BUNDLE
         AudioCapture.cpp
         AudioCapture.h
+        Deck.cpp
+        Deck.h
         FPSLimiter.cpp
         FPSLimiter.h
         ProjectMSDLApplication.cpp

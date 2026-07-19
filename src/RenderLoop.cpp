@@ -13,6 +13,9 @@
 #include "ProjectMSDLApplication.h"
 #include "network/TextureStore.h"
 
+#include <map>
+#include <string>
+
 RenderLoop::RenderLoop()
     : _audioCapture(Poco::Util::Application::instance().getSubsystem<AudioCapture>())
     , _projectMWrapper(Poco::Util::Application::instance().getSubsystem<ProjectMWrapper>())
@@ -23,10 +26,14 @@ RenderLoop::RenderLoop()
     , _projectMGui(Poco::Util::Application::instance().getSubsystem<ProjectMGUI>())
     , _userConfig(ProjectMSDLApplication::instance().UserConfiguration())
 {
-    // Serve named in-memory textures (e.g. album art) to presets. The callback
-    // runs on this (render) thread, reading the network subsystem's store.
-    projectm_set_texture_load_event_callback(_projectMHandle, &TextureStore::LoadCallback,
-                                             &_networkControl.Textures());
+    // Serve named in-memory textures (e.g. album art) to presets, per deck. The
+    // callback runs on this (render) thread, reading the network subsystem's store.
+    for (std::size_t deck = 0; deck < _projectMWrapper.DeckCount(); ++deck)
+    {
+        projectm_set_texture_load_event_callback(_projectMWrapper.DeckAt(deck).ProjectM(),
+                                                 &TextureStore::LoadCallback,
+                                                 &_networkControl.Textures());
+    }
 }
 
 void RenderLoop::Run()
@@ -38,8 +45,10 @@ void RenderLoop::Run()
     notificationCenter.addObserver(_quitNotificationObserver);
 
     _projectMWrapper.DisplayInitialPreset();
-    _networkControl.Playback().SetCurrentPresetFile(
-        _projectMWrapper.CurrentPresetFile());
+    for (std::size_t deck = 0; deck < _projectMWrapper.DeckCount(); ++deck)
+    {
+        _networkControl.Playback().SetCurrentPresetFile(deck, _projectMWrapper.CurrentPresetFile(deck));
+    }
     CheckViewportSize();
     if (_networkControl.Visuals().Get().enabled &&
         !_visualPostProcessor.Initialize(_renderWidth, _renderHeight))
@@ -58,20 +67,32 @@ void RenderLoop::Run()
         _audioCapture.FillBuffer();
         if (_visualPostProcessor.Active())
         {
+            // Render each extra deck into its own texture; deck 0 is rendered as
+            // the compositor base inside VisualPostProcessor::Render.
+            std::map<std::string, std::uint32_t> deckTextures;
+            for (std::size_t deck = 1; deck < _projectMWrapper.DeckCount(); ++deck)
+            {
+                deckTextures["deck" + std::to_string(deck)] =
+                    _projectMWrapper.DeckAt(deck).RenderToTexture();
+            }
+
             PostProcessInputs inputs;
             inputs.time = static_cast<float>(SDL_GetTicks()) / 1000.0F;
             _visualPostProcessor.Render(_projectMWrapper,
                                         _networkControl.Visuals().Get(),
                                         _networkControl.Shaders(),
                                         _networkControl.Textures(),
-                                        inputs);
+                                        inputs,
+                                        deckTextures);
         }
         else
         {
             _projectMWrapper.RenderFrame();
         }
-        _networkControl.Playback().SetCurrentPresetFile(
-            _projectMWrapper.CurrentPresetFile());
+        for (std::size_t deck = 0; deck < _projectMWrapper.DeckCount(); ++deck)
+        {
+            _networkControl.Playback().SetCurrentPresetFile(deck, _projectMWrapper.CurrentPresetFile(deck));
+        }
         _projectMGui.Draw();
 
         _sdlRenderingWindow.Swap();
@@ -85,7 +106,11 @@ void RenderLoop::Run()
     notificationCenter.removeObserver(_quitNotificationObserver);
     _visualPostProcessor.Shutdown();
 
-    projectm_playlist_set_preset_switched_event_callback(_playlistHandle, nullptr, nullptr);
+    for (std::size_t deck = 0; deck < _projectMWrapper.DeckCount(); ++deck)
+    {
+        projectm_playlist_set_preset_switched_event_callback(
+            _projectMWrapper.DeckAt(deck).Playlist(), nullptr, nullptr);
+    }
 }
 
 void RenderLoop::DrainNetworkCommands()
@@ -100,20 +125,28 @@ void RenderLoop::DrainNetworkCommands()
             break;
         }
 
-        PlaybackControlNotification::Action action;
+        // Clamp the requested deck to a valid index; unknown decks fall back to 0.
+        std::size_t deck = command.deckIndex;
+        if (deck >= _projectMWrapper.DeckCount())
+        {
+            deck = 0;
+        }
+
         switch (command.type)
         {
+            // Playback goes direct to the target deck (off the notification bus,
+            // which drives only the keyboard/GUI deck-0 path).
             case ControlCommandType::NextPreset:
-                action = PlaybackControlNotification::Action::NextPreset;
-                break;
+                _projectMWrapper.NextPreset(deck, command.smoothTransition);
+                continue;
 
             case ControlCommandType::PreviousPreset:
-                action = PlaybackControlNotification::Action::PreviousPreset;
-                break;
+                _projectMWrapper.PreviousPreset(deck, command.smoothTransition);
+                continue;
 
             case ControlCommandType::RandomPreset:
-                action = PlaybackControlNotification::Action::RandomPreset;
-                break;
+                _projectMWrapper.RandomPreset(deck, command.smoothTransition);
+                continue;
 
             case ControlCommandType::LoadPresetFile:
             case ControlCommandType::ReloadCurrentPreset:
@@ -124,17 +157,17 @@ void RenderLoop::DrainNetworkCommands()
                 if (command.type == ControlCommandType::LoadPresetFile)
                 {
                     success = _projectMWrapper.LoadPresetFile(
-                        command.payload, command.smoothTransition, error);
+                        deck, command.payload, command.smoothTransition, error);
                 }
                 else if (command.type == ControlCommandType::ReloadCurrentPreset)
                 {
                     success = _projectMWrapper.ReloadCurrentPreset(
-                        command.smoothTransition, error);
+                        deck, command.smoothTransition, error);
                 }
                 else
                 {
                     success = _projectMWrapper.LoadPresetSource(
-                        command.payload, command.smoothTransition, error);
+                        deck, command.payload, command.smoothTransition, error);
                 }
                 _networkControl.Jobs().Complete(command.jobId, success, error);
                 continue;
@@ -157,9 +190,12 @@ void RenderLoop::DrainNetworkCommands()
                 continue;
 
             case ControlCommandType::ReloadTextures:
-                // Drop cached textures so newly uploaded/removed named textures
-                // are re-fetched via the texture-load callback.
-                projectm_reset_textures(_projectMHandle);
+                // Drop cached textures on every deck so newly uploaded/removed
+                // named textures are re-fetched via the texture-load callback.
+                for (std::size_t d = 0; d < _projectMWrapper.DeckCount(); ++d)
+                {
+                    projectm_reset_textures(_projectMWrapper.DeckAt(d).ProjectM());
+                }
                 continue;
 
             case ControlCommandType::ShowToast:
@@ -169,9 +205,6 @@ void RenderLoop::DrainNetworkCommands()
                     new DisplayToastNotification(command.toast));
                 continue;
         }
-
-        Poco::NotificationCenter::defaultCenter().postNotification(
-            new PlaybackControlNotification(action, command.smoothTransition));
     }
 }
 
@@ -327,7 +360,10 @@ void RenderLoop::CheckViewportSize()
 
     if (renderWidth != _renderWidth || renderHeight != _renderHeight)
     {
-        projectm_set_window_size(_projectMHandle, renderWidth, renderHeight);
+        for (std::size_t deck = 0; deck < _projectMWrapper.DeckCount(); ++deck)
+        {
+            _projectMWrapper.DeckAt(deck).Resize(renderWidth, renderHeight);
+        }
         _renderWidth = renderWidth;
         _renderHeight = renderHeight;
 

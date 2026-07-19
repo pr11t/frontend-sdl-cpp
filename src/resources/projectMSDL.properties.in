@@ -59,6 +59,12 @@ window.uiScale = 1.0
 # zoom are then controlled through the HTTP API.
 visual.postProcessingEnabled = false
 
+# Number of independent projectM decks to run (1-4). Deck 0 is the visible base
+# output; extra decks are exposed to the post-processing shader chain as named
+# textures deck1, deck2, ... for compositing. Values above 1 require
+# visual.postProcessingEnabled.
+visual.decks = 1
+
 ### projectM settings
 
 # Default path where projectMSDL will search for presets and textures. The directory will be searched recursively.

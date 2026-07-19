@@ -50,9 +50,9 @@ std::map<int, std::string> AudioCaptureImpl::AudioDeviceList()
     return deviceList;
 }
 
-void AudioCaptureImpl::StartRecording(projectm* projectMHandle, int audioDeviceIndex)
+void AudioCaptureImpl::StartRecording(std::vector<projectm*> projectMHandles, int audioDeviceIndex)
 {
-    _projectMHandle = projectMHandle;
+    _projectMHandles = std::move(projectMHandles);
     _currentAudioDeviceIndex = audioDeviceIndex;
 
     poco_debug_f1(_logger, "Using SDL audio driver \"%s\".", std::string(SDL_GetCurrentAudioDriver()));
@@ -84,7 +84,7 @@ void AudioCaptureImpl::NextAudioDevice()
     // Will wrap around to default capture device (-1).
     int nextAudioDeviceId = ((_currentAudioDeviceIndex + 2) % (SDL_GetNumAudioDevices(true) + 1)) - 1;
 
-    StartRecording(_projectMHandle, nextAudioDeviceId);
+    StartRecording(_projectMHandles, nextAudioDeviceId);
 }
 
 void AudioCaptureImpl::AudioDeviceIndex(int index)
@@ -93,7 +93,7 @@ void AudioCaptureImpl::AudioDeviceIndex(int index)
     {
         StopRecording();
         _currentAudioDeviceIndex = index;
-        StartRecording(_projectMHandle, index);
+        StartRecording(_projectMHandles, index);
     }
 }
 
@@ -157,6 +157,10 @@ void AudioCaptureImpl::AudioInputCallback(void* userData, unsigned char* stream,
 
     unsigned int samples = len / sizeof(float) / instance->_channels;
 
-    projectm_pcm_add_float(instance->_projectMHandle, reinterpret_cast<float*>(stream), samples,
-                           static_cast<projectm_channels>(instance->_channels));
+    // Fan the same PCM data out to every deck so each visualizer reacts to audio.
+    for (auto* handle : instance->_projectMHandles)
+    {
+        projectm_pcm_add_float(handle, reinterpret_cast<float*>(stream), samples,
+                               static_cast<projectm_channels>(instance->_channels));
+    }
 }

@@ -31,7 +31,16 @@ void AudioCapture::initialize(Poco::Util::Application& app)
 
     PrintDeviceList(deviceList);
 
-    _impl->StartRecording(projectMWrapper.ProjectM(), audioDeviceIndex);
+    // Snapshot every deck's handle. Decks are static for the session, so the
+    // audio thread reads this immutable list lock-free.
+    std::vector<projectm*> deckHandles;
+    deckHandles.reserve(projectMWrapper.DeckCount());
+    for (std::size_t deck = 0; deck < projectMWrapper.DeckCount(); ++deck)
+    {
+        deckHandles.push_back(projectMWrapper.DeckAt(deck).ProjectM());
+    }
+
+    _impl->StartRecording(std::move(deckHandles), audioDeviceIndex);
 }
 
 void AudioCapture::uninitialize()

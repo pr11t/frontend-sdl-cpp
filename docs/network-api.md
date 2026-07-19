@@ -88,12 +88,52 @@ curl -s http://127.0.0.1:8080/api/v1/health
 }
 ```
 
+## Decks
+
+A *deck* is an independent projectM instance with its own preset and playlist.
+The frontend runs `--decks N` (1-4, default 1) decks. Deck 0 is always the
+visible base output. When post-processing is enabled
+(`--enableVisualPostProcessing`), the extra decks are exposed to the shader
+chain as named textures `deck1`, `deck2`, … so a pass can composite them (see
+[Compositing decks](#compositing-decks)). With post-processing disabled only
+deck 0 is rendered, so extra decks are created but never shown — the frontend
+logs a warning at startup in that case.
+
+Every instance-scoped playback and preset endpoint accepts an optional
+`?deck=N` query parameter (default `0`). Requesting a deck index that does not
+exist returns `404 deck_not_found`; a non-numeric value returns
+`400 invalid_deck`. With the default single deck, omitting `?deck` behaves
+exactly as before.
+
+### List decks
+
+```http
+GET /api/v1/decks
+```
+
+Returns the deck count and each deck's current preset:
+
+```json
+{
+  "ok": true,
+  "count": 2,
+  "decks": [
+    {"index": 0, "current": {"name": "Artist - Base.milk", "id": "bundled/pack/Artist - Base.milk", "fileBacked": true}},
+    {"index": 1, "current": {"name": "Artist - Overlay.milk", "id": "bundled/pack/Artist - Overlay.milk", "fileBacked": true}}
+  ]
+}
+```
+
+```sh
+curl -s http://127.0.0.1:8080/api/v1/decks
+```
+
 ## Playback
 
 ### Current preset
 
 ```http
-GET /api/v1/playback/current
+GET /api/v1/playback/current[?deck=N]
 ```
 
 Returns the active preset's file name without exposing its filesystem path:
@@ -101,6 +141,7 @@ Returns the active preset's file name without exposing its filesystem path:
 ```json
 {
   "ok": true,
+  "deck": 0,
   "name": "Artist - Example.milk",
   "id": "bundled/pack/Artist - Example.milk",
   "fileBacked": true
@@ -123,7 +164,7 @@ curl -s http://127.0.0.1:8080/api/v1/playback/current
 ### Next preset
 
 ```http
-POST /api/v1/playback/next
+POST /api/v1/playback/next[?deck=N]
 Content-Type: application/json
 
 {}
@@ -132,7 +173,7 @@ Content-Type: application/json
 ### Previous preset
 
 ```http
-POST /api/v1/playback/previous
+POST /api/v1/playback/previous[?deck=N]
 Content-Type: application/json
 
 {}
@@ -141,7 +182,7 @@ Content-Type: application/json
 ### Random preset
 
 ```http
-POST /api/v1/playback/random
+POST /api/v1/playback/random[?deck=N]
 Content-Type: application/json
 
 {}
@@ -150,7 +191,8 @@ Content-Type: application/json
 Random selection temporarily enables playlist shuffle for the selection and
 then restores the previous shuffle setting.
 
-All three endpoints accept an optional transition:
+All three endpoints advance the deck named by `?deck` (default `0`) and accept
+an optional transition:
 
 ```json
 {
@@ -271,12 +313,13 @@ Bundled presets cannot be updated.
 
 ## Loading presets
 
-Load operations execute on the render thread and return a job ID.
+Load operations execute on the render thread and return a job ID. Each accepts
+an optional `?deck=N` (default `0`) to target a specific deck.
 
 ### Load a saved preset
 
 ```http
-POST /api/v1/presets/{presetId}/load
+POST /api/v1/presets/{presetId}/load[?deck=N]
 Content-Type: application/json
 
 {
@@ -287,7 +330,7 @@ Content-Type: application/json
 ### Reload the current preset file
 
 ```http
-POST /api/v1/presets/current/reload
+POST /api/v1/presets/current/reload[?deck=N]
 Content-Type: application/json
 
 {}
@@ -300,7 +343,7 @@ file.
 ### Load source without saving
 
 ```http
-PUT /api/v1/presets/current/source
+PUT /api/v1/presets/current/source[?deck=N]
 Content-Type: application/json
 ```
 
@@ -776,6 +819,11 @@ texture (as `uTexture`) and set custom float uniforms:
 }
 ```
 
+A pass's `texture` may name an [in-memory texture](#in-memory-textures) or a
+**deck texture** — `deck1`, `deck2`, … for the live output of decks 1..N-1 (see
+[Decks](#decks)). Deck textures bind directly to the pass's `uTexture` sampler,
+so a shader composites decks the same way it composites any other texture.
+
 `GET` returns the current chain plus `available` (whether post-processing is
 active). Setting an empty `chain` disables all user passes.
 
@@ -818,6 +866,49 @@ endpoint for live tuning.
 curl -s -X PATCH -H 'Content-Type: application/json' \
   -d '{"passes":[{"index":0,"params":{"amount":0.95}}]}' \
   http://127.0.0.1:8080/api/v1/postprocess/params
+```
+
+### Compositing decks
+
+With two or more [decks](#decks) running, deck 0 is the chain base (`uInput`)
+and each extra deck is available as the named texture `deck1`, `deck2`, …. A
+single-pass shader can crossfade deck 0 with deck 1:
+
+```glsl
+// crossfade: blend the base output (uInput) with deck 1 (uTexture).
+uniform float uMix; // 0 = only deck 0, 1 = only deck 1
+vec4 effect(vec2 uv)
+{
+    return mix(texture(uInput, uv), texture(uTexture, uv), uMix);
+}
+```
+
+Start the app with two decks and post-processing, then wire it up:
+
+```sh
+projectMSDL --decks 2 --enableVisualPostProcessing
+
+# Upload the shader
+curl -s -X PUT --data-binary \
+  'uniform float uMix; vec4 effect(vec2 uv){return mix(texture(uInput,uv),texture(uTexture,uv),uMix);}' \
+  http://127.0.0.1:8080/api/v1/shaders/crossfade
+
+# Bind deck 1 as the pass texture and set the blend
+curl -s -X PUT -H 'Content-Type: application/json' \
+  -d '{"chain":[{"shader":"crossfade","texture":"deck1","params":{"uMix":0.5}}]}' \
+  http://127.0.0.1:8080/api/v1/postprocess
+
+# Sweep the blend live (no recompile)
+curl -s -X PATCH -H 'Content-Type: application/json' \
+  -d '{"passes":[{"index":0,"params":{"uMix":0.8}}]}' \
+  http://127.0.0.1:8080/api/v1/postprocess/params
+```
+
+Load a different preset onto deck 1 to change what is blended in:
+
+```sh
+curl -s -X POST -H 'Content-Type: application/json' -d '{}' \
+  'http://127.0.0.1:8080/api/v1/playback/random?deck=1'
 ```
 
 > [!NOTE]

@@ -11,16 +11,11 @@
 
 #include <SDL2/SDL_opengl.h>
 
+#include <algorithm>
 #include <cmath>
 
 namespace {
-// projectM treats a preset duration of 0 as "advance almost immediately". Map any
-// non-positive configured duration to an effectively infinite one so that
-// displayDuration = 0 means "never auto-advance", as documented.
-double EffectivePresetDuration(double configured)
-{
-    return configured > 0.0 ? configured : 1.0e9;
-}
+constexpr std::size_t kMaxDecks = 4;
 } // namespace
 
 const char* ProjectMWrapper::name() const
@@ -34,98 +29,43 @@ void ProjectMWrapper::initialize(Poco::Util::Application& app)
     _projectMConfigView = projectMSDLApp.config().createView("projectM");
     _userConfig = projectMSDLApp.UserConfiguration();
     _runtimeConfig = projectMSDLApp.RuntimeConfiguration();
-    poco_information_f1(_logger, "Events enabled: %?d", _projectMConfigView->eventsEnabled());
 
-    if (!_projectM)
+    if (_decks.empty())
     {
         auto& sdlWindow = app.getSubsystem<SDLRenderingWindow>();
-
         int canvasWidth{0};
         int canvasHeight{0};
-
         sdlWindow.GetDrawableSize(canvasWidth, canvasHeight);
 
         auto presetPaths = GetPathListWithDefault("presetPath", app.config().getString("application.dir", ""));
         auto texturePaths = GetPathListWithDefault("texturePath", app.config().getString("", ""));
 
-        _projectM = projectm_create();
-        if (!_projectM)
+        auto deckCount = static_cast<std::size_t>(std::max(1, app.config().getInt("visual.decks", 1)));
+        deckCount = std::min(deckCount, kMaxDecks);
+        poco_information_f1(_logger, "Creating %z projectM deck(s).", deckCount);
+
+        if (deckCount > 1 && !app.config().getBool("visual.postProcessingEnabled", false))
         {
-            poco_error(_logger, "Failed to initialize projectM. Possible reasons are a lack of required OpenGL features or GPU resources.");
-            throw std::runtime_error("projectM initialization failed");
+            poco_warning(_logger,
+                         "More than one deck was requested but post-processing is disabled; "
+                         "only deck 0 is visible. Restart with --enableVisualPostProcessing and a "
+                         "shader chain that samples deck1, deck2, ... to composite the extra decks.");
         }
 
-        int fps = _projectMConfigView->getInt("fps", 60);
-        if (fps <= 0)
+        for (std::size_t index = 0; index < deckCount; ++index)
         {
-            // We don't know the target framerate, pass in a default of 60.
-            fps = 60;
+            auto deck = std::make_unique<Deck>(index, _projectMConfigView);
+            deck->Initialize(canvasWidth, canvasHeight, presetPaths, texturePaths);
+            _decks.push_back(std::move(deck));
         }
-
-        projectm_set_window_size(_projectM, canvasWidth, canvasHeight);
-        projectm_set_fps(_projectM, fps);
-        projectm_set_mesh_size(_projectM, _projectMConfigView->getInt("meshX", 48), _projectMConfigView->getInt("meshY", 32));
-        projectm_set_aspect_correction(_projectM, _projectMConfigView->getBool("aspectCorrectionEnabled", true));
-        projectm_set_preset_locked(_projectM, _projectMConfigView->getBool("presetLocked", false));
-
-        // Preset display settings
-        projectm_set_preset_duration(_projectM, EffectivePresetDuration(_projectMConfigView->getDouble("displayDuration", 30.0)));
-        projectm_set_soft_cut_duration(_projectM, _projectMConfigView->getDouble("transitionDuration", 3.0));
-        projectm_set_hard_cut_enabled(_projectM, _projectMConfigView->getBool("hardCutsEnabled", false));
-        projectm_set_hard_cut_duration(_projectM, _projectMConfigView->getDouble("hardCutDuration", 20.0));
-        projectm_set_hard_cut_sensitivity(_projectM, static_cast<float>(_projectMConfigView->getDouble("hardCutSensitivity", 1.0)));
-        projectm_set_beat_sensitivity(_projectM, static_cast<float>(_projectMConfigView->getDouble("beatSensitivity", 1.0)));
-
-        if (!texturePaths.empty())
-        {
-            std::vector<const char*> texturePathList;
-            texturePathList.reserve(texturePaths.size());
-            for (const auto& texturePath : texturePaths)
-            {
-                texturePathList.push_back(texturePath.data());
-            }
-
-            projectm_set_texture_search_paths(_projectM, texturePathList.data(), texturePaths.size());
-        }
-
-        // Playlist
-        _playlist = projectm_playlist_create(_projectM);
-        if (!_playlist)
-        {
-
-            poco_error(_logger, "Failed to create the projectM preset playlist manager instance.");
-            throw std::runtime_error("Playlist initialization failed");
-        }
-
-        projectm_playlist_set_shuffle(_playlist, _projectMConfigView->getBool("shuffleEnabled", true));
-
-        for (const auto& presetPath : presetPaths)
-        {
-            Poco::File file(presetPath);
-            if (file.exists() && file.isFile())
-            {
-                projectm_playlist_add_preset(_playlist, presetPath.c_str(), false);
-            }
-            else
-            {
-                // Symbolic links also fall under this. Without complex resolving, we can't
-                // be sure what the link exactly points to, especially if a trailing slash is missing.
-                projectm_playlist_add_path(_playlist, presetPath.c_str(), true, false);
-            }
-        }
-        projectm_playlist_sort(_playlist, 0, projectm_playlist_size(_playlist), SORT_PREDICATE_FILENAME_ONLY, SORT_ORDER_ASCENDING);
-
-        projectm_playlist_set_preset_switched_event_callback(_playlist, &ProjectMWrapper::PresetSwitchedEvent, static_cast<void*>(this));
     }
 
     Poco::NotificationCenter::defaultCenter().addObserver(_playbackControlNotificationObserver);
 
-    // Observe user configuration changes (set via the settings window)
+    // Observe user configuration changes (set via the settings window) and runtime
+    // overrides (set via the HTTP config API). Both deliver full "projectM." keys.
     _userConfig->propertyChanged += Poco::delegate(this, &ProjectMWrapper::OnConfigurationPropertyChanged);
     _userConfig->propertyRemoved += Poco::delegate(this, &ProjectMWrapper::OnConfigurationPropertyRemoved);
-
-    // Observe runtime overrides (set via the HTTP config API). Both layers deliver
-    // full "projectM." keys and are applied by re-reading the effective config view.
     _runtimeConfig->propertyChanged += Poco::delegate(this, &ProjectMWrapper::OnConfigurationPropertyChanged);
     _runtimeConfig->propertyRemoved += Poco::delegate(this, &ProjectMWrapper::OnConfigurationPropertyRemoved);
 }
@@ -138,27 +78,32 @@ void ProjectMWrapper::uninitialize()
     _userConfig->propertyChanged -= Poco::delegate(this, &ProjectMWrapper::OnConfigurationPropertyChanged);
     Poco::NotificationCenter::defaultCenter().removeObserver(_playbackControlNotificationObserver);
 
-    if (_projectM)
-    {
-        projectm_destroy(_projectM);
-        _projectM = nullptr;
-    }
+    _decks.clear();
+}
 
-    if (_playlist)
-    {
-        projectm_playlist_destroy(_playlist);
-        _playlist = nullptr;
-    }
+std::size_t ProjectMWrapper::DeckCount() const
+{
+    return _decks.size();
+}
+
+Deck& ProjectMWrapper::DeckAt(std::size_t index)
+{
+    return *_decks[index];
+}
+
+Deck& ProjectMWrapper::MainDeck() const
+{
+    return *_decks[0];
 }
 
 projectm_handle ProjectMWrapper::ProjectM() const
 {
-    return _projectM;
+    return MainDeck().ProjectM();
 }
 
 projectm_playlist_handle ProjectMWrapper::Playlist() const
 {
-    return _playlist;
+    return MainDeck().Playlist();
 }
 
 int ProjectMWrapper::TargetFPS()
@@ -168,58 +113,36 @@ int ProjectMWrapper::TargetFPS()
 
 void ProjectMWrapper::UpdateRealFPS(float fps)
 {
-    projectm_set_fps(_projectM, static_cast<uint32_t>(std::round(fps)));
+    for (auto& deck : _decks)
+    {
+        deck->UpdateRealFPS(fps);
+    }
 }
 
 void ProjectMWrapper::RenderFrame() const
 {
-    glClearColor(0.0, 0.0, 0.0, 0.0);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-    size_t currentMeshX{0};
-    size_t currentMeshY{0};
-    projectm_get_mesh_size(_projectM, &currentMeshX, &currentMeshY);
-    if (currentMeshX != _projectMConfigView->getInt("meshX", 220) ||
-        currentMeshY != _projectMConfigView->getInt("meshY", 125))
-    {
-        projectm_set_mesh_size(_projectM, _projectMConfigView->getInt("meshX", 220), _projectMConfigView->getInt("meshY", 125));
-    }
-
-    projectm_opengl_render_frame(_projectM);
+    MainDeck().RenderToScreen();
 }
 
 void ProjectMWrapper::RenderFrameToFramebuffer(std::uint32_t framebuffer) const
 {
-    // projectm_opengl_render_frame_fbo() is the only supported way to make
-    // libprojectM composite into a caller-owned FBO (RenderFrame() otherwise
-    // hard-binds the target framebuffer itself). The symbol is unreleased --
-    // it exists on libprojectM master but in no release tag up to 4.1.7 -- so
-    // the vcpkg build pins projectm to a master commit via vcpkg-overlays/.
-    // See vcpkg-overlays/projectm/portfile.cmake for the rationale and the
-    // follow-up plan (release-tag bump or FBO-free post-processing rework).
-    projectm_opengl_render_frame_fbo(_projectM, framebuffer);
+    MainDeck().RenderToFramebuffer(framebuffer);
 }
 
 void ProjectMWrapper::DisplayInitialPreset()
 {
-    if (!_projectMConfigView->getBool("enableSplash", true))
+    for (auto& deck : _decks)
     {
-        if (_projectMConfigView->getBool("shuffleEnabled", true))
-        {
-            projectm_playlist_play_next(_playlist, true);
-        }
-        else
-        {
-            projectm_playlist_set_position(_playlist, 0, true);
-        }
+        deck->DisplayInitialPreset();
     }
 }
 
 void ProjectMWrapper::ChangeBeatSensitivity(float value)
 {
-    projectm_set_beat_sensitivity(_projectM, projectm_get_beat_sensitivity(_projectM) + value);
+    auto projectM = MainDeck().ProjectM();
+    projectm_set_beat_sensitivity(projectM, projectm_get_beat_sensitivity(projectM) + value);
     Poco::NotificationCenter::defaultCenter().postNotification(
-        new DisplayToastNotification(Poco::format("Beat Sensitivity: %.2hf", projectm_get_beat_sensitivity(_projectM))));
+        new DisplayToastNotification(Poco::format("Beat Sensitivity: %.2hf", projectm_get_beat_sensitivity(projectM))));
 }
 
 std::string ProjectMWrapper::ProjectMBuildVersion()
@@ -232,125 +155,95 @@ std::string ProjectMWrapper::ProjectMRuntimeVersion()
     auto* projectMVersion = projectm_get_version_string();
     std::string projectMRuntimeVersion(projectMVersion);
     projectm_free_string(projectMVersion);
-
     return projectMRuntimeVersion;
 }
 
 void ProjectMWrapper::PresetFileNameToClipboard() const
 {
-    SDL_SetClipboardText(_currentPresetFile.c_str());
-}
-
-namespace {
-struct PresetLoadFailure
-{
-    bool failed{false};
-    std::string message;
-};
+    SDL_SetClipboardText(MainDeck().CurrentPresetFile().c_str());
 }
 
 bool ProjectMWrapper::LoadPresetFile(const std::string& filename, bool smoothTransition, std::string& error)
 {
-    PresetLoadFailure failure;
-    projectm_set_preset_switch_failed_event_callback(_projectM, &ProjectMWrapper::CapturePresetLoadFailure, &failure);
-    projectm_load_preset_file(_projectM, filename.c_str(), smoothTransition);
-    projectm_playlist_connect(_playlist, _projectM);
-    if (failure.failed)
-    {
-        error = failure.message;
-        return false;
-    }
-    _currentPresetFile = filename;
-    Poco::NotificationCenter::defaultCenter().postNotification(new UpdateWindowTitleNotification);
-    return true;
+    return MainDeck().LoadPresetFile(filename, smoothTransition, error);
 }
 
 bool ProjectMWrapper::LoadPresetSource(const std::string& source, bool smoothTransition, std::string& error)
 {
-    PresetLoadFailure failure;
-    projectm_set_preset_switch_failed_event_callback(_projectM, &ProjectMWrapper::CapturePresetLoadFailure, &failure);
-    projectm_load_preset_data(_projectM, source.c_str(), smoothTransition);
-    projectm_playlist_connect(_playlist, _projectM);
-    if (failure.failed)
-    {
-        error = failure.message;
-        return false;
-    }
-    _currentPresetFile.clear();
-    Poco::NotificationCenter::defaultCenter().postNotification(new UpdateWindowTitleNotification);
-    return true;
+    return MainDeck().LoadPresetSource(source, smoothTransition, error);
 }
 
 bool ProjectMWrapper::ReloadCurrentPreset(bool smoothTransition, std::string& error)
 {
-    if (_currentPresetFile.empty())
-    {
-        error = "The current preset was loaded from memory and has no file to reload.";
-        return false;
-    }
-    return LoadPresetFile(_currentPresetFile, smoothTransition, error);
+    return MainDeck().ReloadCurrentPreset(smoothTransition, error);
 }
 
 const std::string& ProjectMWrapper::CurrentPresetFile() const
 {
-    return _currentPresetFile;
+    return MainDeck().CurrentPresetFile();
 }
 
-void ProjectMWrapper::CapturePresetLoadFailure(const char*, const char* message, void* context)
+bool ProjectMWrapper::LoadPresetFile(std::size_t deck, const std::string& filename, bool smoothTransition, std::string& error)
 {
-    auto* failure = static_cast<PresetLoadFailure*>(context);
-    failure->failed = true;
-    failure->message = message ? message : "Preset loading failed.";
+    return DeckAt(std::min(deck, _decks.size() - 1)).LoadPresetFile(filename, smoothTransition, error);
 }
 
-void ProjectMWrapper::PresetSwitchedEvent(bool isHardCut, unsigned int index, void* context)
+bool ProjectMWrapper::LoadPresetSource(std::size_t deck, const std::string& source, bool smoothTransition, std::string& error)
 {
-    auto that = reinterpret_cast<ProjectMWrapper*>(context);
-    auto presetName = projectm_playlist_item(that->_playlist, index);
-    poco_information_f1(that->_logger, "Displaying preset: %s", std::string(presetName));
-    that->_currentPresetFile = presetName;
-    projectm_playlist_free_string(presetName);
+    return DeckAt(std::min(deck, _decks.size() - 1)).LoadPresetSource(source, smoothTransition, error);
+}
 
-    Poco::NotificationCenter::defaultCenter().postNotification(new UpdateWindowTitleNotification);
+bool ProjectMWrapper::ReloadCurrentPreset(std::size_t deck, bool smoothTransition, std::string& error)
+{
+    return DeckAt(std::min(deck, _decks.size() - 1)).ReloadCurrentPreset(smoothTransition, error);
+}
+
+std::string ProjectMWrapper::CurrentPresetFile(std::size_t deck) const
+{
+    return _decks[std::min(deck, _decks.size() - 1)]->CurrentPresetFile();
+}
+
+void ProjectMWrapper::NextPreset(std::size_t deck, bool smoothTransition)
+{
+    DeckAt(std::min(deck, _decks.size() - 1)).NextPreset(smoothTransition);
+}
+
+void ProjectMWrapper::PreviousPreset(std::size_t deck, bool smoothTransition)
+{
+    DeckAt(std::min(deck, _decks.size() - 1)).PreviousPreset(smoothTransition);
+}
+
+void ProjectMWrapper::RandomPreset(std::size_t deck, bool smoothTransition)
+{
+    DeckAt(std::min(deck, _decks.size() - 1)).RandomPreset(smoothTransition);
 }
 
 void ProjectMWrapper::PlaybackControlNotificationHandler(const Poco::AutoPtr<PlaybackControlNotification>& notification)
 {
-    bool shuffleEnabled = projectm_playlist_get_shuffle(_playlist);
+    // Keyboard / GUI playback controls act on deck 0.
+    auto& deck = MainDeck();
+    const bool smooth = notification->SmoothTransition();
 
     switch (notification->ControlAction())
     {
         case PlaybackControlNotification::Action::NextPreset:
-            projectm_playlist_set_shuffle(_playlist, false);
-            projectm_playlist_play_next(_playlist, !notification->SmoothTransition());
-            projectm_playlist_set_shuffle(_playlist, shuffleEnabled);
+            deck.NextPreset(smooth);
             break;
-
         case PlaybackControlNotification::Action::PreviousPreset:
-            projectm_playlist_set_shuffle(_playlist, false);
-            projectm_playlist_play_previous(_playlist, !notification->SmoothTransition());
-            projectm_playlist_set_shuffle(_playlist, shuffleEnabled);
+            deck.PreviousPreset(smooth);
             break;
-
         case PlaybackControlNotification::Action::LastPreset:
-            projectm_playlist_play_last(_playlist, !notification->SmoothTransition());
+            projectm_playlist_play_last(deck.Playlist(), !smooth);
             break;
-
-        case PlaybackControlNotification::Action::RandomPreset: {
-            projectm_playlist_set_shuffle(_playlist, true);
-            projectm_playlist_play_next(_playlist, !notification->SmoothTransition());
-            projectm_playlist_set_shuffle(_playlist, shuffleEnabled);
+        case PlaybackControlNotification::Action::RandomPreset:
+            deck.RandomPreset(smooth);
             break;
-        }
-
         case PlaybackControlNotification::Action::ToggleShuffle:
-            _userConfig->setBool("projectM.shuffleEnabled", !shuffleEnabled);
+            _userConfig->setBool("projectM.shuffleEnabled", !projectm_playlist_get_shuffle(deck.Playlist()));
             break;
-
-        case PlaybackControlNotification::Action::TogglePresetLocked: {
-            _userConfig->setBool("projectM.presetLocked", !projectm_get_preset_locked(_projectM));
+        case PlaybackControlNotification::Action::TogglePresetLocked:
+            _userConfig->setBool("projectM.presetLocked", !projectm_get_preset_locked(deck.ProjectM()));
             break;
-        }
     }
 }
 
@@ -384,86 +277,22 @@ void ProjectMWrapper::OnConfigurationPropertyChanged(const Poco::Util::AbstractC
 
 void ProjectMWrapper::OnConfigurationPropertyRemoved(const std::string& key)
 {
-    if (_projectM == nullptr || _playlist == nullptr)
+    // Live config applies to all decks (v1: global config namespace).
+    for (auto& deck : _decks)
     {
-        return;
-    }
-
-    if (key == "projectM.presetLocked")
-    {
-        projectm_set_preset_locked(_projectM, _projectMConfigView->getBool("presetLocked", false));
-        Poco::NotificationCenter::defaultCenter().postNotification(new UpdateWindowTitleNotification);
-    }
-
-    if (key == "projectM.shuffleEnabled")
-    {
-        projectm_playlist_set_shuffle(_playlist, _projectMConfigView->getBool("shuffleEnabled", true));
-    }
-
-    if (key == "projectM.aspectCorrectionEnabled")
-    {
-        projectm_set_aspect_correction(_projectM, _projectMConfigView->getBool("aspectCorrectionEnabled", true));
-    }
-
-    if (key == "projectM.displayDuration")
-    {
-        projectm_set_preset_duration(_projectM, EffectivePresetDuration(_projectMConfigView->getDouble("displayDuration", 30.0)));
-    }
-
-    if (key == "projectM.transitionDuration")
-    {
-        projectm_set_soft_cut_duration(_projectM, _projectMConfigView->getDouble("transitionDuration", 3.0));
-    }
-
-    if (key == "projectM.hardCutsEnabled")
-    {
-        projectm_set_hard_cut_enabled(_projectM, _projectMConfigView->getBool("hardCutsEnabled", false));
-    }
-
-    if (key == "projectM.hardCutDuration")
-    {
-        projectm_set_hard_cut_duration(_projectM, _projectMConfigView->getDouble("hardCutDuration", 20.0));
-    }
-
-    if (key == "projectM.hardCutSensitivity")
-    {
-        projectm_set_hard_cut_sensitivity(_projectM, static_cast<float>(_projectMConfigView->getDouble("hardCutSensitivity", 1.0)));
-    }
-
-    if (key == "projectM.beatSensitivity")
-    {
-        projectm_set_beat_sensitivity(_projectM, static_cast<float>(_projectMConfigView->getDouble("beatSensitivity", 1.0)));
-    }
-
-    if (key == "projectM.fps")
-    {
-        int fps = _projectMConfigView->getInt("fps", 60);
-        if (fps <= 0)
-        {
-            fps = 60;
-        }
-        projectm_set_fps(_projectM, fps);
-    }
-
-    if (key == "projectM.meshX" || key == "projectM.meshY")
-    {
-        projectm_set_mesh_size(_projectM, _projectMConfigView->getUInt64("meshX", 48), _projectMConfigView->getUInt64("meshY", 32));
+        deck->ApplyConfigKey(key);
     }
 }
 
 void ProjectMWrapper::SetRuntimeConfig(const std::string& key, const std::string& value)
 {
     // Writing the highest-precedence runtime layer fires the change observer above,
-    // which re-reads the effective config view and applies the matching projectM
-    // setter. Must run on the render thread (guaranteed by the control command queue).
+    // which applies the matching projectM setter to every deck. Render thread only.
     _runtimeConfig->setString(key, value);
 }
 
 void ProjectMWrapper::ClearRuntimeConfig(const std::string& key)
 {
-    // Removing the key fires propertyRemoved, which re-reads the effective config
-    // view (now without the runtime override) and re-applies the value from the
-    // next layer down. Must run on the render thread (see SetRuntimeConfig).
     if (_runtimeConfig->hasProperty(key))
     {
         _runtimeConfig->remove(key);

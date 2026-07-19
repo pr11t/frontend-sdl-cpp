@@ -265,6 +265,12 @@ void ProjectMSDLApplication::defineOptions(Poco::Util::OptionSet& options)
                           .callback(
                               OptionCallback<ProjectMSDLApplication>(
                                   this, &ProjectMSDLApplication::EnableVisualPostProcessing)));
+
+    options.addOption(Option("decks", "",
+                             "Number of independent projectM decks to run (1-4). Extra decks are "
+                             "composited through the post-processing shader chain as deck1, deck2, ...",
+                             false, "<number>", true)
+                          .binding("visual.decks", _commandLineOverrides));
 }
 
 int ProjectMSDLApplication::main(POCO_UNUSED const std::vector<std::string>& args)

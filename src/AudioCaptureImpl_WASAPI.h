@@ -9,6 +9,7 @@
 
 #include <mmdeviceapi.h>
 #include <string>
+#include <vector>
 
 struct projectm;
 
@@ -45,11 +46,11 @@ public:
 
     /**
      * @brief Starts audio capturing with the first available device.
-     * @param projectMHandle projectM instance handle that will receive the captured data.
+     * @param projectMHandles projectM instance handles (one per deck) that will each receive the captured data.
      * @param audioDeviceIndex The initial audio device ID to capture from. Use -1 to select the implementation's
      *                      default device.
      */
-    void StartRecording(projectm* projectMHandle, int audioDeviceIndex);
+    void StartRecording(std::vector<projectm*> projectMHandles, int audioDeviceIndex);
 
     /**
      * @brief Stops audio recording.
@@ -280,7 +281,7 @@ protected:
 
     Poco::Logger& _logger{Poco::Logger::get("AudioCapture.WASAPI")}; //!< The class logger.
 
-    projectm* _projectMHandle{nullptr}; //!< Handle if the projectM instance that will receive the audio data.
+    std::vector<projectm*> _projectMHandles; //!< Handles of the projectM decks that each receive the audio data.
     int _currentAudioDeviceIndex{-1}; //!< Currently selected audio device index.
     IAudioClient* _audioClient{nullptr}; //!< Currently used audio client.
     IAudioCaptureClient* _audioCaptureClient{nullptr}; //!< Currently used capture client.

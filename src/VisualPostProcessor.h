@@ -37,7 +37,8 @@ public:
     bool Resize(int width, int height);
     void Render(ProjectMWrapper& projectM, const VisualState& state,
                 ShaderChainStore& shaders, TextureStore& textures,
-                const PostProcessInputs& inputs);
+                const PostProcessInputs& inputs,
+                const std::map<std::string, std::uint32_t>& deckTextures);
     void Shutdown();
 
     bool Active() const;
