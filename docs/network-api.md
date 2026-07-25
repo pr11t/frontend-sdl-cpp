@@ -667,6 +667,68 @@ Removes all textures and reports how many were `cleared`.
 > they are never written to disk. Each change reloads all textures, so this is
 > intended for occasional updates (e.g. once per track), not per-frame updates.
 
+## Persistent text overlays
+
+Named text overlays are rendered above the visualization and post-processing
+chain. They remain visible until replaced or deleted, making them suitable for
+synced lyrics, track metadata, captions, and status displays.
+
+```http
+PUT /api/v1/text-overlays/{name}
+Content-Type: application/json
+```
+
+```json
+{
+  "text": "We're just two lost souls",
+  "visible": true,
+  "position": {
+    "x": 0.5,
+    "y": 0.9,
+    "anchor": "bottom"
+  },
+  "alignment": "center",
+  "font": "sans",
+  "size": 1.15,
+  "maxWidth": 0.82,
+  "padding": 12,
+  "cornerRadius": 8,
+  "color": "#FFFFFFFF",
+  "backgroundColor": "#00000099"
+}
+```
+
+| Field | Type and range |
+| --- | --- |
+| `text` | String, 1–2000 characters (required) |
+| `visible` | Boolean; default `true` |
+| `position.x`, `position.y` | Normalized viewport coordinates, `0`–`1`; defaults `0.5`, `0.85` |
+| `position.anchor` | `center`, `top`, `bottom`, `left`, `right`, or a corner such as `bottom-right` |
+| `alignment` | `left`, `center` (default), or `right` |
+| `font` | `sans` (default) or `mono`; both fonts are bundled and platform-independent |
+| `size` | Font multiplier, `0.25`–`8`; default `1` |
+| `maxWidth` | Maximum normalized text width, `0.05`–`1`; default `0.8` |
+| `padding` | Background padding in logical pixels, `0`–`100`; default `12` |
+| `cornerRadius` | Background corner radius, `0`–`100`; default `8` |
+| `color` | Text color as `#RRGGBB` or `#RRGGBBAA`; default white |
+| `backgroundColor` | Background as `#RRGGBB` or `#RRGGBBAA`; default `#0000008C` |
+
+Resource names use 1–128 characters from `[A-Za-z0-9_.-]`. `PUT` replaces the
+complete named overlay and re-enables external visuals if they were hidden with
+the `V` shortcut.
+
+```http
+GET    /api/v1/text-overlays
+GET    /api/v1/text-overlays/{name}
+DELETE /api/v1/text-overlays/{name}
+DELETE /api/v1/text-overlays
+```
+
+Text is rendered from the bundled font atlas, so updating a lyric line does not
+decode or reload an image texture. Persistent external overlays respect the
+shared `visual.externalVisualsEnabled` state; internal toast notifications do
+not.
+
 ## Text overlay (toast)
 
 Displays a short text message over the visualization using the application's

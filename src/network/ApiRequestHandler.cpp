@@ -15,6 +15,7 @@
 #include <cmath>
 #include <cstdint>
 #include <exception>
+#include <iomanip>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -97,6 +98,68 @@ bool ParseToastAnimation(const std::string& value, ToastOptions::Animation& anim
     return false;
 }
 
+bool ParseTextOverlayAnchor(const std::string& value, TextOverlayAnchor& anchor)
+{
+    if (value == "center") { anchor = TextOverlayAnchor::Center; return true; }
+    if (value == "top") { anchor = TextOverlayAnchor::Top; return true; }
+    if (value == "bottom") { anchor = TextOverlayAnchor::Bottom; return true; }
+    if (value == "left") { anchor = TextOverlayAnchor::Left; return true; }
+    if (value == "right") { anchor = TextOverlayAnchor::Right; return true; }
+    if (value == "top-left") { anchor = TextOverlayAnchor::TopLeft; return true; }
+    if (value == "top-right") { anchor = TextOverlayAnchor::TopRight; return true; }
+    if (value == "bottom-left") { anchor = TextOverlayAnchor::BottomLeft; return true; }
+    if (value == "bottom-right") { anchor = TextOverlayAnchor::BottomRight; return true; }
+    return false;
+}
+
+const char* TextOverlayAnchorName(TextOverlayAnchor anchor)
+{
+    switch (anchor)
+    {
+        case TextOverlayAnchor::Center: return "center";
+        case TextOverlayAnchor::Top: return "top";
+        case TextOverlayAnchor::Bottom: return "bottom";
+        case TextOverlayAnchor::Left: return "left";
+        case TextOverlayAnchor::Right: return "right";
+        case TextOverlayAnchor::TopLeft: return "top-left";
+        case TextOverlayAnchor::TopRight: return "top-right";
+        case TextOverlayAnchor::BottomLeft: return "bottom-left";
+        case TextOverlayAnchor::BottomRight: return "bottom-right";
+    }
+    return "center";
+}
+
+bool ParseTextOverlayAlignment(const std::string& value, TextOverlayAlignment& alignment)
+{
+    if (value == "left") { alignment = TextOverlayAlignment::Left; return true; }
+    if (value == "center") { alignment = TextOverlayAlignment::Center; return true; }
+    if (value == "right") { alignment = TextOverlayAlignment::Right; return true; }
+    return false;
+}
+
+const char* TextOverlayAlignmentName(TextOverlayAlignment alignment)
+{
+    switch (alignment)
+    {
+        case TextOverlayAlignment::Left: return "left";
+        case TextOverlayAlignment::Center: return "center";
+        case TextOverlayAlignment::Right: return "right";
+    }
+    return "center";
+}
+
+bool ParseTextOverlayFont(const std::string& value, TextOverlayFont& font)
+{
+    if (value == "sans") { font = TextOverlayFont::Sans; return true; }
+    if (value == "mono") { font = TextOverlayFont::Mono; return true; }
+    return false;
+}
+
+const char* TextOverlayFontName(TextOverlayFont font)
+{
+    return font == TextOverlayFont::Mono ? "mono" : "sans";
+}
+
 // Parses "#RRGGBB" or "#RRGGBBAA" into 0..1 colour components.
 bool ParseHexColor(const std::string& value, float& r, float& g, float& b, float& a)
 {
@@ -139,6 +202,42 @@ bool ParseHexColor(const std::string& value, float& r, float& g, float& b, float
         a = static_cast<float>(aa) / 255.0f;
     }
     return true;
+}
+
+std::string ColorHex(const TextOverlayColor& color)
+{
+    const auto channel = [](float value) {
+        return static_cast<int>(std::lround(std::clamp(value, 0.0F, 1.0F) * 255.0F));
+    };
+    std::ostringstream output;
+    output << '#' << std::uppercase << std::hex << std::setfill('0')
+           << std::setw(2) << channel(color.r)
+           << std::setw(2) << channel(color.g)
+           << std::setw(2) << channel(color.b)
+           << std::setw(2) << channel(color.a);
+    return output.str();
+}
+
+Poco::JSON::Object TextOverlayJson(const TextOverlay& overlay)
+{
+    Poco::JSON::Object result;
+    result.set("name", overlay.name);
+    result.set("text", overlay.text);
+    result.set("visible", overlay.visible);
+    Poco::JSON::Object position;
+    position.set("x", overlay.x);
+    position.set("y", overlay.y);
+    position.set("anchor", TextOverlayAnchorName(overlay.anchor));
+    result.set("position", position);
+    result.set("alignment", TextOverlayAlignmentName(overlay.alignment));
+    result.set("font", TextOverlayFontName(overlay.font));
+    result.set("size", overlay.size);
+    result.set("maxWidth", overlay.maxWidth);
+    result.set("padding", overlay.padding);
+    result.set("cornerRadius", overlay.cornerRadius);
+    result.set("color", ColorHex(overlay.color));
+    result.set("backgroundColor", ColorHex(overlay.background));
+    return result;
 }
 
 void WriteJson(Poco::Net::HTTPServerResponse& response,
@@ -477,6 +576,7 @@ ApiRequestHandler::ApiRequestHandler(ControlCommandQueue& commands, JobRegistry&
                                      PresetRepository& presets, VisualStateStore& visuals,
                                      PlaybackStateStore& playback, TextureStore& textures,
                                      VideoStore& videos, ShaderChainStore& shaders,
+                                     TextOverlayStore& textOverlays,
                                      PerformanceMetricsStore& performance,
                                      ConfigLayers configLayers)
     : _commands(commands)
@@ -487,6 +587,7 @@ ApiRequestHandler::ApiRequestHandler(ControlCommandQueue& commands, JobRegistry&
     , _textures(textures)
     , _videos(videos)
     , _shaders(shaders)
+    , _textOverlays(textOverlays)
     , _performance(performance)
     , _configLayers(std::move(configLayers))
 {
@@ -1311,6 +1412,275 @@ void ApiRequestHandler::handleRequest(Poco::Net::HTTPServerRequest& request,
             return WriteJson(response, Poco::Net::HTTPResponse::HTTP_OK, result);
         }
 
+        if (path == "/api/v1/text-overlays")
+        {
+            if (method == "GET")
+            {
+                Poco::JSON::Array items;
+                for (const auto& overlay : _textOverlays.List())
+                {
+                    items.add(TextOverlayJson(overlay));
+                }
+                Poco::JSON::Object body;
+                body.set("ok", true);
+                body.set("overlays", items);
+                return WriteJson(response, Poco::Net::HTTPResponse::HTTP_OK, body);
+            }
+            if (method != "DELETE")
+            {
+                return MethodNotAllowed(response, "GET, DELETE");
+            }
+            Poco::JSON::Object result;
+            result.set("ok", true);
+            result.set("cleared", static_cast<int>(_textOverlays.Clear()));
+            return WriteJson(response, Poco::Net::HTTPResponse::HTTP_OK, result);
+        }
+
+        {
+            const std::string overlayPrefix = "/api/v1/text-overlays/";
+            if (path.compare(0, overlayPrefix.size(), overlayPrefix) == 0)
+            {
+                const auto name = path.substr(overlayPrefix.size());
+                if (!ValidResourceName(name))
+                {
+                    return WriteError(
+                        response, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
+                        "invalid_overlay_name",
+                        "Overlay name must be 1-128 characters of [A-Za-z0-9_.-].");
+                }
+
+                if (method == "GET")
+                {
+                    TextOverlay overlay;
+                    if (!_textOverlays.Find(name, overlay))
+                    {
+                        return WriteError(response, Poco::Net::HTTPResponse::HTTP_NOT_FOUND,
+                                          "not_found", "No text overlay named " + name + ".");
+                    }
+                    auto body = TextOverlayJson(overlay);
+                    body.set("ok", true);
+                    return WriteJson(response, Poco::Net::HTTPResponse::HTTP_OK, body);
+                }
+
+                if (method == "DELETE")
+                {
+                    if (!_textOverlays.Remove(name))
+                    {
+                        return WriteError(response, Poco::Net::HTTPResponse::HTTP_NOT_FOUND,
+                                          "not_found", "No text overlay named " + name + ".");
+                    }
+                    Poco::JSON::Object result;
+                    result.set("ok", true);
+                    result.set("removed", name);
+                    return WriteJson(response, Poco::Net::HTTPResponse::HTTP_OK, result);
+                }
+
+                if (method != "PUT")
+                {
+                    return MethodNotAllowed(response, "GET, PUT, DELETE");
+                }
+
+                std::string body;
+                if (!ReadBody(request, response, controlBodyLimit, body))
+                {
+                    return;
+                }
+                const auto object = ParseObject(body);
+                if (!Fields(object, {"text", "visible", "position", "alignment",
+                                     "font", "size", "maxWidth", "padding",
+                                     "cornerRadius", "color", "backgroundColor"},
+                            response))
+                {
+                    return;
+                }
+
+                TextOverlay overlay;
+                overlay.name = name;
+                if (!object->has("text") || !object->get("text").isString())
+                {
+                    return WriteError(response, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
+                                      "invalid_request", "text is required and must be a string.");
+                }
+                overlay.text = object->getValue<std::string>("text");
+                if (overlay.text.empty() || overlay.text.size() > 2000)
+                {
+                    return WriteError(response, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
+                                      "invalid_request", "text must be 1-2000 characters.");
+                }
+
+                if (object->has("visible"))
+                {
+                    if (!object->get("visible").isBoolean())
+                    {
+                        return WriteError(response, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
+                                          "invalid_request", "visible must be a boolean.");
+                    }
+                    overlay.visible = object->getValue<bool>("visible");
+                }
+
+                if (object->has("position"))
+                {
+                    if (!object->isObject("position"))
+                    {
+                        return WriteError(response, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
+                                          "invalid_request", "position must be an object.");
+                    }
+                    const auto position = object->getObject("position");
+                    if (!Fields(position, {"x", "y", "anchor"}, response))
+                    {
+                        return;
+                    }
+                    for (const auto* coordinate : {"x", "y"})
+                    {
+                        if (!position->has(coordinate))
+                        {
+                            continue;
+                        }
+                        const auto value = position->get(coordinate);
+                        if (!value.isNumeric())
+                        {
+                            return WriteError(response, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
+                                              "invalid_request",
+                                              std::string(coordinate) + " must be a number.");
+                        }
+                        const double number = value.convert<double>();
+                        if (!std::isfinite(number) || number < 0.0 || number > 1.0)
+                        {
+                            return WriteError(
+                                response, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
+                                "invalid_request",
+                                std::string(coordinate) + " must be between 0 and 1.");
+                        }
+                        if (coordinate[0] == 'x')
+                        {
+                            overlay.x = static_cast<float>(number);
+                        }
+                        else
+                        {
+                            overlay.y = static_cast<float>(number);
+                        }
+                    }
+                    if (position->has("anchor"))
+                    {
+                        if (!position->get("anchor").isString() ||
+                            !ParseTextOverlayAnchor(
+                                position->getValue<std::string>("anchor"), overlay.anchor))
+                        {
+                            return WriteError(
+                                response, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
+                                "invalid_request",
+                                "position.anchor must be center, top, bottom, left, right, "
+                                "top-left, top-right, bottom-left, or bottom-right.");
+                        }
+                    }
+                }
+
+                if (object->has("alignment"))
+                {
+                    if (!object->get("alignment").isString() ||
+                        !ParseTextOverlayAlignment(
+                            object->getValue<std::string>("alignment"), overlay.alignment))
+                    {
+                        return WriteError(response, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
+                                          "invalid_request",
+                                          "alignment must be left, center, or right.");
+                    }
+                }
+                if (object->has("font"))
+                {
+                    if (!object->get("font").isString() ||
+                        !ParseTextOverlayFont(
+                            object->getValue<std::string>("font"), overlay.font))
+                    {
+                        return WriteError(response, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
+                                          "invalid_request", "font must be sans or mono.");
+                    }
+                }
+
+                const auto parseNumber =
+                    [&](const char* field, double minimum, double maximum,
+                        float& target) -> bool {
+                        if (!object->has(field))
+                        {
+                            return true;
+                        }
+                        const auto value = object->get(field);
+                        if (!value.isNumeric())
+                        {
+                            WriteError(response, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
+                                       "invalid_request",
+                                       std::string(field) + " must be a number.");
+                            return false;
+                        }
+                        const double number = value.convert<double>();
+                        if (!std::isfinite(number) || number < minimum || number > maximum)
+                        {
+                            std::ostringstream message;
+                            message << field << " must be between "
+                                    << minimum << " and " << maximum << '.';
+                            WriteError(response, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
+                                       "invalid_request", message.str());
+                            return false;
+                        }
+                        target = static_cast<float>(number);
+                        return true;
+                    };
+                if (!parseNumber("size", 0.25, 8.0, overlay.size) ||
+                    !parseNumber("maxWidth", 0.05, 1.0, overlay.maxWidth) ||
+                    !parseNumber("padding", 0.0, 100.0, overlay.padding) ||
+                    !parseNumber("cornerRadius", 0.0, 100.0, overlay.cornerRadius))
+                {
+                    return;
+                }
+
+                const auto parseColor =
+                    [&](const char* field, TextOverlayColor& target) -> bool {
+                        if (!object->has(field))
+                        {
+                            return true;
+                        }
+                        if (!object->get(field).isString() ||
+                            !ParseHexColor(object->getValue<std::string>(field),
+                                           target.r, target.g, target.b, target.a))
+                        {
+                            WriteError(response, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
+                                       "invalid_request",
+                                       std::string(field) +
+                                           " must be #RRGGBB or #RRGGBBAA.");
+                            return false;
+                        }
+                        return true;
+                    };
+                if (!parseColor("color", overlay.color) ||
+                    !parseColor("backgroundColor", overlay.background))
+                {
+                    return;
+                }
+
+                // An external client publishing fresh content re-enables all
+                // external visual layers after the local V shortcut hid them.
+                if (!_configLayers.effective->getBool(
+                        "visual.externalVisualsEnabled", true))
+                {
+                    ControlCommand command;
+                    command.type = ControlCommandType::SetConfig;
+                    command.configKey = "visual.externalVisualsEnabled";
+                    command.configValue = "true";
+                    if (!_commands.TryEnqueue(command))
+                    {
+                        return WriteError(
+                            response, Poco::Net::HTTPResponse::HTTP_SERVICE_UNAVAILABLE,
+                            "queue_full", "The remote-control command queue is full.");
+                    }
+                }
+
+                _textOverlays.Set(name, overlay);
+                auto result = TextOverlayJson(overlay);
+                result.set("ok", true);
+                return WriteJson(response, Poco::Net::HTTPResponse::HTTP_ACCEPTED, result);
+            }
+        }
+
         if (path == "/api/v1/toast")
         {
             // Displays an on-screen text overlay using the app's existing toast
@@ -1919,6 +2289,7 @@ ApiRequestHandlerFactory::ApiRequestHandlerFactory(ControlCommandQueue& commands
                                                    TextureStore& textures,
                                                    VideoStore& videos,
                                                    ShaderChainStore& shaders,
+                                                   TextOverlayStore& textOverlays,
                                                    PerformanceMetricsStore& performance,
                                                    ConfigLayers configLayers)
     : _commands(commands)
@@ -1929,6 +2300,7 @@ ApiRequestHandlerFactory::ApiRequestHandlerFactory(ControlCommandQueue& commands
     , _textures(textures)
     , _videos(videos)
     , _shaders(shaders)
+    , _textOverlays(textOverlays)
     , _performance(performance)
     , _configLayers(std::move(configLayers))
 {
@@ -1939,5 +2311,5 @@ Poco::Net::HTTPRequestHandler* ApiRequestHandlerFactory::createRequestHandler(
 {
     return new ApiRequestHandler(_commands, _jobs, _presets, _visuals,
                                  _playback, _textures, _videos, _shaders,
-                                 _performance, _configLayers);
+                                 _textOverlays, _performance, _configLayers);
 }

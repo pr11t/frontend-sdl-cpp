@@ -7,6 +7,7 @@
 #include "ToastMessage.h"
 
 #include "notifications/DisplayToastNotification.h"
+#include "network/TextOverlayStore.h"
 
 #include <SDL2/SDL.h>
 
@@ -14,6 +15,8 @@
 #include <Poco/NObserver.h>
 
 #include <Poco/Util/Subsystem.h>
+
+#include <vector>
 
 struct ImFont;
 class ProjectMWrapper;
@@ -60,7 +63,8 @@ public:
      * @brief Draws the UI, including toasts.
      * If neither a toast nor the UI are visible, this is basically a no-op.
      */
-    void Draw();
+    void Draw(const std::vector<TextOverlay>& textOverlays,
+              bool externalVisualsEnabled);
 
     /**
      * @brief Supplies the latest measured frame performance for the overlay.
@@ -115,6 +119,8 @@ private:
     static float GetClampedUserScalingFactor();
 
     void DisplayToastNotificationHandler(const Poco::AutoPtr<DisplayToastNotification>& notification);
+
+    void DrawTextOverlay(const TextOverlay& overlay);
 
     ProjectMWrapper* _projectMWrapper{nullptr};
 

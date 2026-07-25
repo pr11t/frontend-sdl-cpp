@@ -178,7 +178,8 @@ void RenderLoop::Run()
         {
             _networkControl.Playback().SetCurrentPresetFile(deck, _projectMWrapper.CurrentPresetFile(deck));
         }
-        _projectMGui.Draw();
+        _projectMGui.Draw(_networkControl.TextOverlays().List(),
+                          externalVisualsEnabled);
 
         _sdlRenderingWindow.Swap();
 

@@ -7,6 +7,7 @@
 #include "network/PlaybackState.h"
 #include "network/PresetRepository.h"
 #include "network/ShaderChainStore.h"
+#include "network/TextOverlayStore.h"
 #include "network/TextureStore.h"
 #include "network/VideoStore.h"
 #include "network/VisualState.h"
@@ -21,6 +22,7 @@ public:
                       PresetRepository& presets, VisualStateStore& visuals,
                       PlaybackStateStore& playback, TextureStore& textures,
                       VideoStore& videos, ShaderChainStore& shaders,
+                      TextOverlayStore& textOverlays,
                       PerformanceMetricsStore& performance,
                       ConfigLayers configLayers);
 
@@ -36,6 +38,7 @@ private:
     TextureStore& _textures;
     VideoStore& _videos;
     ShaderChainStore& _shaders;
+    TextOverlayStore& _textOverlays;
     PerformanceMetricsStore& _performance;
     ConfigLayers _configLayers;
 };
@@ -47,6 +50,7 @@ public:
                              PresetRepository& presets, VisualStateStore& visuals,
                              PlaybackStateStore& playback, TextureStore& textures,
                              VideoStore& videos, ShaderChainStore& shaders,
+                             TextOverlayStore& textOverlays,
                              PerformanceMetricsStore& performance,
                              ConfigLayers configLayers);
 
@@ -62,6 +66,7 @@ private:
     TextureStore& _textures;
     VideoStore& _videos;
     ShaderChainStore& _shaders;
+    TextOverlayStore& _textOverlays;
     PerformanceMetricsStore& _performance;
     ConfigLayers _configLayers;
 };

@@ -18,6 +18,8 @@ add_library(ProjectMSDL-Network STATIC
         ShaderChainStore.cpp
         ShaderChainStore.h
         StbImageImpl.cpp
+        TextOverlayStore.cpp
+        TextOverlayStore.h
         TextureStore.cpp
         TextureStore.h
         VideoStore.cpp

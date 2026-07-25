@@ -7,6 +7,7 @@
 #include "network/PlaybackState.h"
 #include "network/PresetRepository.h"
 #include "network/ShaderChainStore.h"
+#include "network/TextOverlayStore.h"
 #include "network/TextureStore.h"
 #include "network/VideoStore.h"
 #include "network/VisualState.h"
@@ -30,6 +31,7 @@ public:
     TextureStore& Textures();
     VideoStore& Videos();
     ShaderChainStore& Shaders();
+    TextOverlayStore& TextOverlays();
     PerformanceMetricsStore& Performance();
 
 protected:
@@ -44,6 +46,7 @@ private:
     TextureStore _textures;
     VideoStore _videos;
     ShaderChainStore _shaders;
+    TextOverlayStore _textOverlays;
     PerformanceMetricsStore _performance;
     std::unique_ptr<PresetRepository> _presets;
     std::unique_ptr<HttpApiServer> _server;

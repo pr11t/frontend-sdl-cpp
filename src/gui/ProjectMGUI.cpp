@@ -13,6 +13,9 @@
 
 #include <Poco/Util/Application.h>
 
+#include <algorithm>
+#include <cfloat>
+#include <string>
 #include <utility>
 
 const char* ProjectMGUI::name() const
@@ -127,13 +130,20 @@ void ProjectMGUI::SetPerformanceMetrics(float fps, double frameTimeMilliseconds)
     _frameTimeMilliseconds = frameTimeMilliseconds;
 }
 
-void ProjectMGUI::Draw()
+void ProjectMGUI::Draw(const std::vector<TextOverlay>& textOverlays,
+                       bool externalVisualsEnabled)
 {
     const bool displayFps = Poco::Util::Application::instance().config().getBool(
         "projectM.displayFps", false);
+    const bool displayTextOverlays =
+        externalVisualsEnabled &&
+        std::any_of(textOverlays.begin(), textOverlays.end(),
+                    [](const TextOverlay& overlay) {
+                        return overlay.visible && !overlay.text.empty();
+                    });
 
     // Don't render UI at all if there's no need.
-    if (!_toast && !_visible && !displayFps)
+    if (!_toast && !_visible && !displayFps && !displayTextOverlays)
     {
         return;
     }
@@ -157,6 +167,17 @@ void ProjectMGUI::Draw()
         auto currentFrameTicks = SDL_GetTicks64();
         secondsSinceLastFrame = static_cast<float>(currentFrameTicks - _lastFrameTicks) * .001f;
         _lastFrameTicks = currentFrameTicks;
+    }
+
+    if (displayTextOverlays)
+    {
+        for (const auto& overlay : textOverlays)
+        {
+            if (overlay.visible && !overlay.text.empty())
+            {
+                DrawTextOverlay(overlay);
+            }
+        }
     }
 
     if (_toast)
@@ -199,6 +220,97 @@ void ProjectMGUI::Draw()
 
     ImGui::Render();
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+}
+
+void ProjectMGUI::DrawTextOverlay(const TextOverlay& overlay)
+{
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    const ImVec2 workPosition = viewport->WorkPos;
+    const ImVec2 workSize = viewport->WorkSize;
+    const ImVec2 position(
+        workPosition.x + workSize.x * overlay.x,
+        workPosition.y + workSize.y * overlay.y);
+
+    ImVec2 pivot(0.5F, 0.5F);
+    switch (overlay.anchor)
+    {
+        case TextOverlayAnchor::Center: break;
+        case TextOverlayAnchor::Top: pivot = {0.5F, 0.0F}; break;
+        case TextOverlayAnchor::Bottom: pivot = {0.5F, 1.0F}; break;
+        case TextOverlayAnchor::Left: pivot = {0.0F, 0.5F}; break;
+        case TextOverlayAnchor::Right: pivot = {1.0F, 0.5F}; break;
+        case TextOverlayAnchor::TopLeft: pivot = {0.0F, 0.0F}; break;
+        case TextOverlayAnchor::TopRight: pivot = {1.0F, 0.0F}; break;
+        case TextOverlayAnchor::BottomLeft: pivot = {0.0F, 1.0F}; break;
+        case TextOverlayAnchor::BottomRight: pivot = {1.0F, 1.0F}; break;
+    }
+
+    constexpr ImGuiWindowFlags flags =
+        ImGuiWindowFlags_NoDecoration |
+        ImGuiWindowFlags_AlwaysAutoResize |
+        ImGuiWindowFlags_NoSavedSettings |
+        ImGuiWindowFlags_NoFocusOnAppearing |
+        ImGuiWindowFlags_NoNav |
+        ImGuiWindowFlags_NoMove |
+        ImGuiWindowFlags_NoInputs;
+
+    const float scaledPadding = overlay.padding * _textScalingFactor;
+    const float maximumTextWidth =
+        std::max(1.0F, workSize.x * overlay.maxWidth);
+    ImGui::SetNextWindowPos(position, ImGuiCond_Always, pivot);
+    ImGui::SetNextWindowSizeConstraints(
+        ImVec2(0.0F, 0.0F),
+        ImVec2(maximumTextWidth + scaledPadding * 2.0F, FLT_MAX));
+    ImGui::PushStyleVar(
+        ImGuiStyleVar_WindowPadding,
+        ImVec2(scaledPadding, scaledPadding));
+    ImGui::PushStyleVar(
+        ImGuiStyleVar_WindowRounding,
+        overlay.cornerRadius * _textScalingFactor);
+    ImGui::PushStyleColor(
+        ImGuiCol_WindowBg,
+        ImVec4(overlay.background.r, overlay.background.g,
+               overlay.background.b, overlay.background.a));
+    ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.0F, 0.0F, 0.0F, 0.0F));
+
+    ImFont* font = overlay.font == TextOverlayFont::Mono ? _uiFont : _toastFont;
+    ImGui::PushFont(font);
+    const std::string windowName = "##TextOverlay-" + overlay.name;
+    if (ImGui::Begin(windowName.c_str(), nullptr, flags))
+    {
+        ImGui::SetWindowFontScale(overlay.size);
+        ImGui::PushStyleColor(
+            ImGuiCol_Text,
+            ImVec4(overlay.color.r, overlay.color.g,
+                   overlay.color.b, overlay.color.a));
+
+        const float availableWidth =
+            std::min(maximumTextWidth, ImGui::GetContentRegionAvail().x);
+        const float unwrappedWidth =
+            ImGui::CalcTextSize(overlay.text.c_str()).x;
+        float alignmentOffset = 0.0F;
+        if (overlay.alignment == TextOverlayAlignment::Center)
+        {
+            alignmentOffset = (availableWidth - unwrappedWidth) * 0.5F;
+        }
+        else if (overlay.alignment == TextOverlayAlignment::Right)
+        {
+            alignmentOffset = availableWidth - unwrappedWidth;
+        }
+        if (alignmentOffset > 0.0F)
+        {
+            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + alignmentOffset);
+        }
+
+        ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + maximumTextWidth);
+        ImGui::TextWrapped("%s", overlay.text.c_str());
+        ImGui::PopTextWrapPos();
+        ImGui::PopStyleColor();
+    }
+    ImGui::End();
+    ImGui::PopFont();
+    ImGui::PopStyleColor(2);
+    ImGui::PopStyleVar(2);
 }
 
 bool ProjectMGUI::WantsKeyboardInput()

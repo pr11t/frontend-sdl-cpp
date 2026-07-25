@@ -6,6 +6,7 @@
 #include "network/PlaybackState.h"
 #include "network/PresetRepository.h"
 #include "network/ShaderChainStore.h"
+#include "network/TextOverlayStore.h"
 #include "network/TextureStore.h"
 #include "network/VideoStore.h"
 #include "network/VisualState.h"
@@ -54,26 +55,33 @@ ApiResponse Request(std::uint16_t port,
                     const std::string& body = "",
                     const std::string& ifMatch = "")
 {
-    Poco::Net::HTTPClientSession session("127.0.0.1", port);
-    Poco::Net::HTTPRequest request(method, path, Poco::Net::HTTPMessage::HTTP_1_1);
-    request.setContentType("application/json");
-    request.setContentLength(body.size());
-    if (!ifMatch.empty())
+    try
     {
-        request.set("If-Match", ifMatch);
+        Poco::Net::HTTPClientSession session("127.0.0.1", port);
+        Poco::Net::HTTPRequest request(method, path, Poco::Net::HTTPMessage::HTTP_1_1);
+        request.setContentType("application/json");
+        request.setContentLength(body.size());
+        if (!ifMatch.empty())
+        {
+            request.set("If-Match", ifMatch);
+        }
+        auto& output = session.sendRequest(request);
+        output << body;
+
+        Poco::Net::HTTPResponse response;
+        auto& input = session.receiveResponse(response);
+        std::ostringstream responseBody;
+        Poco::StreamCopier::copyStream(input, responseBody);
+
+        Poco::JSON::Parser parser;
+        auto json = parser.parse(responseBody.str()).extract<Poco::JSON::Object::Ptr>();
+        return {response.getStatus(), response.getReason(), json,
+                response.get("Allow", ""), response.get("ETag", "")};
     }
-    auto& output = session.sendRequest(request);
-    output << body;
-
-    Poco::Net::HTTPResponse response;
-    auto& input = session.receiveResponse(response);
-    std::ostringstream responseBody;
-    Poco::StreamCopier::copyStream(input, responseBody);
-
-    Poco::JSON::Parser parser;
-    auto json = parser.parse(responseBody.str()).extract<Poco::JSON::Object::Ptr>();
-    return {response.getStatus(), response.getReason(), json,
-            response.get("Allow", ""), response.get("ETag", "")};
+    catch (const Poco::Exception& error)
+    {
+        throw std::runtime_error(method + " " + path + ": " + error.displayText());
+    }
 }
 
 void RunTests()
@@ -98,6 +106,7 @@ void RunTests()
     TextureStore textures;
     VideoStore videos;
     ShaderChainStore shaders;
+    TextOverlayStore textOverlays;
     PerformanceMetricsStore performance;
     ConfigLayers configLayers;
     configLayers.effective = new Poco::Util::MapConfiguration();
@@ -105,7 +114,7 @@ void RunTests()
     configLayers.commandLine = new Poco::Util::MapConfiguration();
     configLayers.user = new Poco::Util::MapConfiguration();
     HttpApiServer server(queue, jobs, presets, visuals, playback, textures,
-                         videos, shaders, performance, configLayers);
+                         videos, shaders, textOverlays, performance, configLayers);
     server.Start("127.0.0.1", 0);
     Require(server.Running(), "Server should be running.");
     Require(server.Port() != 0, "Ephemeral server port should be assigned.");
@@ -114,6 +123,42 @@ void RunTests()
     Require(health.status == Poco::Net::HTTPResponse::HTTP_OK, "Health should return 200.");
     Require(health.body->getValue<bool>("ok"), "Health response should be successful.");
     Require(health.body->getValue<int>("apiVersion") == 1, "Health API version should be 1.");
+
+    auto putLyrics = Request(
+        server.Port(), "PUT", "/api/v1/text-overlays/lyrics",
+        R"({"text":"A line of lyrics","font":"sans","size":1.4,"color":"#FFEEDD","backgroundColor":"#10203080","position":{"x":0.5,"y":0.85,"anchor":"bottom"},"alignment":"center"})");
+    Require(putLyrics.status == Poco::Net::HTTPResponse::HTTP_ACCEPTED,
+            "Text overlay upsert should return 202.");
+    Require(putLyrics.body->getValue<std::string>("name") == "lyrics",
+            "Text overlay upsert should preserve its name.");
+    Require(putLyrics.body->getValue<std::string>("color") == "#FFEEDDFF",
+            "Text overlay colors should be normalized to RGBA.");
+
+    auto getLyrics = Request(server.Port(), "GET",
+                             "/api/v1/text-overlays/lyrics");
+    Require(getLyrics.status == Poco::Net::HTTPResponse::HTTP_OK,
+            "A named text overlay should be readable.");
+    Require(getLyrics.body->getValue<std::string>("text") == "A line of lyrics",
+            "A named text overlay should preserve its text.");
+    Require(getLyrics.body->getValue<std::string>("font") == "sans",
+            "A named text overlay should preserve its font.");
+
+    auto listTextOverlays = Request(server.Port(), "GET",
+                                    "/api/v1/text-overlays");
+    Require(listTextOverlays.body->getArray("overlays")->size() == 1,
+            "Text overlay collection should list stored overlays.");
+
+    auto invalidTextOverlay = Request(
+        server.Port(), "PUT", "/api/v1/text-overlays/bad",
+        R"({"text":"bad","font":"system-installed-font"})");
+    Require(invalidTextOverlay.status ==
+                Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
+            "Unsupported platform fonts should be rejected.");
+
+    auto removeLyrics = Request(server.Port(), "DELETE",
+                                "/api/v1/text-overlays/lyrics");
+    Require(removeLyrics.status == Poco::Net::HTTPResponse::HTTP_OK,
+            "A named text overlay should be removable.");
 
     performance.Record(16.7, 8.0, 60, 59.8);
     performance.Record(24.0, 20.0, 60, 55.0);
