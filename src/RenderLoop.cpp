@@ -126,10 +126,15 @@ void RenderLoop::Run()
         PollEvents();
         CheckViewportSize();
         _audioCapture.FillBuffer();
+        const bool externalVisualsEnabled =
+            Poco::Util::Application::instance().config().getBool(
+                "visual.externalVisualsEnabled", true);
         if (_videoDeck)
         {
             const auto now = SDL_GetTicks();
-            if (_videoDeck->Update(now) == VideoDeck::UpdateResult::EndOfStream)
+            _videoDeck->SetPaused(!externalVisualsEnabled, now);
+            if (externalVisualsEnabled &&
+                _videoDeck->Update(now) == VideoDeck::UpdateResult::EndOfStream)
             {
                 RestartVideoLoop(now);
             }
@@ -139,18 +144,21 @@ void RenderLoop::Run()
             // Render each extra projectM deck into its own texture; deck 0 is
             // rendered as the compositor base inside VisualPostProcessor::Render.
             std::map<std::string, std::uint32_t> deckTextures;
-            for (std::size_t deck = 1; deck < _projectMWrapper.DeckCount(); ++deck)
+            for (std::size_t deck = 1;
+                 externalVisualsEnabled && deck < _projectMWrapper.DeckCount();
+                 ++deck)
             {
                 deckTextures["deck" + std::to_string(deck)] =
                     _projectMWrapper.DeckAt(deck).RenderToTexture();
             }
-            if (_videoDeck)
+            if (_videoDeck && externalVisualsEnabled)
             {
                 deckTextures["video"] = _videoDeck->Texture();
             }
 
             PostProcessInputs inputs;
             inputs.time = static_cast<float>(SDL_GetTicks()) / 1000.0F;
+            inputs.externalVisualsEnabled = externalVisualsEnabled;
             _visualPostProcessor.Render(_projectMWrapper,
                                         _networkControl.Visuals().Get(),
                                         _networkControl.Shaders(),
@@ -158,7 +166,7 @@ void RenderLoop::Run()
                                         inputs,
                                         deckTextures);
         }
-        else if (_videoDeck)
+        else if (_videoDeck && externalVisualsEnabled)
         {
             _videoDeck->RenderToScreen(_renderWidth, _renderHeight); // no post-processing: video only
         }
@@ -812,6 +820,14 @@ void RenderLoop::KeyEvent(const SDL_KeyboardEvent& event, bool down)
             {
                 _sdlRenderingWindow.ToggleFullscreen();
             }
+            else
+            {
+                const bool enabled =
+                    Poco::Util::Application::instance().config().getBool(
+                        "projectM.displayFps", false);
+                _projectMWrapper.SetRuntimeConfig(
+                    "projectM.displayFps", enabled ? "false" : "true");
+            }
             break;
 
         case SDLK_i:
@@ -852,6 +868,15 @@ void RenderLoop::KeyEvent(const SDL_KeyboardEvent& event, bool down)
         case SDLK_y:
             Poco::NotificationCenter::defaultCenter().postNotification(new PlaybackControlNotification(PlaybackControlNotification::Action::ToggleShuffle));
             break;
+
+        case SDLK_v: {
+            const bool enabled =
+                Poco::Util::Application::instance().config().getBool(
+                    "visual.externalVisualsEnabled", true);
+            _projectMWrapper.SetRuntimeConfig(
+                "visual.externalVisualsEnabled", enabled ? "false" : "true");
+            break;
+        }
 
         case SDLK_BACKSPACE:
             Poco::NotificationCenter::defaultCenter().postNotification(new PlaybackControlNotification(PlaybackControlNotification::Action::LastPreset, _keyStates._shiftPressed));

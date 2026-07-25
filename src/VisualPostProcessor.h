@@ -20,6 +20,7 @@ class TextureStore;
 struct PostProcessInputs
 {
     float time{0.0f}; //!< Seconds since start, exposed as the uTime uniform.
+    bool externalVisualsEnabled{true}; //!< Apply uploaded/video/deck shader passes.
 };
 
 /**

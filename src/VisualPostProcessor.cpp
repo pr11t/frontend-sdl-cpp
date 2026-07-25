@@ -329,15 +329,18 @@ void VisualPostProcessor::Render(ProjectMWrapper& projectM, const VisualState& s
 
     // Pass 0 is the built-in transform (mirror/rotation/zoom); passes 1..N are
     // user shaders. When the transform is an identity (no mirror, zoom 1, no
-    // rotation) and at least one user pass will render to the screen, skip it --
-    // it would be a full-screen copy doing nothing. Ping-pong between framebuffers
-    // A and B; the final pass renders to the screen.
+    // rotation) and at least one enabled user pass will render to the screen,
+    // skip it -- it would be a full-screen copy doing nothing. The live external
+    // visuals switch sets userPassCount to zero without discarding chain state.
+    // Ping-pong between framebuffers A and B; the final pass renders to the screen.
     const bool identityTransform =
         !state.mirrorX && !state.mirrorY &&
         std::abs(state.zoom - 1.0) < 1.0e-4 &&
         std::abs(state.rotationDegrees) < 1.0e-4;
-    const bool runTransform = !identityTransform || _passes.empty();
-    const std::size_t totalPasses = (runTransform ? 1u : 0u) + _passes.size();
+    const std::size_t userPassCount =
+        inputs.externalVisualsEnabled ? _passes.size() : 0;
+    const bool runTransform = !identityTransform || userPassCount == 0;
+    const std::size_t totalPasses = (runTransform ? 1u : 0u) + userPassCount;
     GLuint readTexture = _texture;
     for (std::size_t i = 0; i < totalPasses; ++i)
     {

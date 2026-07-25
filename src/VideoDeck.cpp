@@ -270,6 +270,11 @@ void VideoDeck::UploadCurrentFrame()
 
 VideoDeck::UpdateResult VideoDeck::Update(std::uint32_t nowMilliseconds)
 {
+    if (_paused)
+    {
+        return UpdateResult::Running;
+    }
+
     if (!_started)
     {
         _startMilliseconds = nowMilliseconds;
@@ -293,6 +298,24 @@ VideoDeck::UpdateResult VideoDeck::Update(std::uint32_t nowMilliseconds)
         UploadCurrentFrame();
     }
     return UpdateResult::Running;
+}
+
+void VideoDeck::SetPaused(bool paused, std::uint32_t nowMilliseconds)
+{
+    if (paused == _paused)
+    {
+        return;
+    }
+
+    if (paused)
+    {
+        _pauseStartedMilliseconds = nowMilliseconds;
+    }
+    else if (_started)
+    {
+        _startMilliseconds += nowMilliseconds - _pauseStartedMilliseconds;
+    }
+    _paused = paused;
 }
 
 void VideoDeck::RestartFromPrepared(VideoDeck& prepared, std::uint32_t nowMilliseconds)

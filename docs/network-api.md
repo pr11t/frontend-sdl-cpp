@@ -515,6 +515,28 @@ frame in the background. At end-of-stream the render loop swaps to that prepared
 decoder without reopening, seeking, or decoding catch-up frames on the render
 thread, then prepares the following loop.
 
+### Temporarily hide external visuals
+
+The live `externalVisualsEnabled` configuration switch bypasses video, extra
+decks, and uploaded shader passes without deleting them. Video timing pauses,
+so restoring the layers does not trigger catch-up decoding:
+
+```sh
+# Show only the projectM base visualization.
+curl -X PATCH http://127.0.0.1:8080/api/v1/config \
+  -H 'Content-Type: application/json' \
+  -d '{"externalVisualsEnabled":false}'
+
+# Restore the preserved video and shader state.
+curl -X PATCH http://127.0.0.1:8080/api/v1/config \
+  -H 'Content-Type: application/json' \
+  -d '{"externalVisualsEnabled":true}'
+```
+
+The `V` keyboard shortcut and **Options → External Visual Layers** menu item
+write this same runtime configuration value. `F` similarly toggles
+`displayFps`.
+
 With post-processing enabled, the video is exposed as the named `video` texture
 and a built-in compositor pass is inserted before existing user passes. Deck 0
 continues to provide the projectM visualization. Without post-processing, the
@@ -785,6 +807,7 @@ layers. Updates are queued and applied on the render thread.
 | `meshY` | Integer `1`–`512` | Per-pixel mesh height. |
 | `fps` | Integer `0`–`1000` | Target FPS used for projectM timing. `0` disables the frame limiter. |
 | `displayFps` | Boolean | Display measured FPS and frame time in the top-right corner. |
+| `externalVisualsEnabled` | Boolean | Apply video, extra decks, and uploaded shader passes. Disabling preserves their state for immediate restoration. |
 | `fullscreen` | Boolean | Switch the window between fullscreen and windowed mode. |
 
 For example, enable the overlay while the visualizer is running:

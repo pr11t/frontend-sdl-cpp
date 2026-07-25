@@ -161,6 +161,8 @@ void HelpWindow::FillKeyboardShortcutsTable()
         {"Lock Current Preset", "Spacebar"},
         {"Toggle Shuffle", "y"},
         {"Toggle Fullscreen", "Ctrl-f, Right Mouse"},
+        {"Toggle FPS Overlay", "f"},
+        {"Toggle External Visual Layers", "v"},
         {"Toggle Aspect Correction", "Ctrl-a"},
         {"Next Audio Input Device", "Ctrl-i"},
         {"Move to Next Monitor", "Ctrl-m"},

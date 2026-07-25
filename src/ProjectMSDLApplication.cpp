@@ -225,6 +225,12 @@ void ProjectMSDLApplication::defineOptions(Poco::Util::OptionSet& options)
                              false, "<0/1>", true)
                           .binding("projectM.displayFps", _commandLineOverrides));
 
+    options.addOption(Option(
+                          "externalVisualsEnabled", "",
+                          "Apply video, extra decks and uploaded post-processing shader layers.",
+                          false, "<0/1>", true)
+                          .binding("visual.externalVisualsEnabled", _commandLineOverrides));
+
     options.addOption(Option("shuffleEnabled", "", "Shuffle enabled.",
                              false, "<0/1>", true)
                           .binding("projectM.shuffleEnabled", _commandLineOverrides));

@@ -147,6 +147,19 @@ void RunTests()
                 overlayCommand.configValue == "true",
             "FPS overlay update should target the displayFps configuration.");
 
+    auto disableExternalVisuals = Request(
+        server.Port(), "PATCH", "/api/v1/config",
+        R"({"externalVisualsEnabled":false})");
+    Require(disableExternalVisuals.status == Poco::Net::HTTPResponse::HTTP_ACCEPTED,
+            "External visual layers should be runtime-configurable.");
+    ControlCommand externalVisualsCommand{};
+    Require(queue.TryDequeue(externalVisualsCommand),
+            "External visual layers update should be queued.");
+    Require(externalVisualsCommand.type == ControlCommandType::SetConfig &&
+                externalVisualsCommand.configKey == "visual.externalVisualsEnabled" &&
+                externalVisualsCommand.configValue == "false",
+            "External visual layers should use the shared runtime configuration.");
+
     auto uploadVideo = Request(server.Port(), "PUT", "/api/v1/videos/clip.mp4",
                                "fake-video-bytes");
     Require(uploadVideo.status == Poco::Net::HTTPResponse::HTTP_ACCEPTED,

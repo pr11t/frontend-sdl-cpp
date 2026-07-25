@@ -238,6 +238,13 @@ void SettingsWindow::DrawWindowSettingsTab()
             BooleanSetting("projectM.displayFps", false);
 
             ImGui::TableNextRow();
+            LabelWithTooltip(
+                "External Visual Layers",
+                "Apply video, extra decks, and uploaded post-processing shaders.\n"
+                "Disabling preserves their state for instant restoration.");
+            BooleanSetting("visual.externalVisualsEnabled", true);
+
+            ImGui::TableNextRow();
             LabelWithTooltip("Wait for Vertical Sync",
                              "Wait for vertical sync interval before displaying the next frame.\nThis will limit max FPS to the vertical sync frequency but prevents tearing.");
             BooleanSetting("window.waitForVerticalSync", false);

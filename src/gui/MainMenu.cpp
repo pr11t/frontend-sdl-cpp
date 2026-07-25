@@ -108,6 +108,26 @@ void MainMenu::Draw()
 
             ImGui::Separator();
 
+            if (ImGui::MenuItem("Display FPS", "F",
+                                app.config().getBool("projectM.displayFps", false)))
+            {
+                _projectMWrapper.SetRuntimeConfig(
+                    "projectM.displayFps",
+                    app.config().getBool("projectM.displayFps", false)
+                        ? "false" : "true");
+            }
+            if (ImGui::MenuItem(
+                    "External Visual Layers", "V",
+                    app.config().getBool("visual.externalVisualsEnabled", true)))
+            {
+                _projectMWrapper.SetRuntimeConfig(
+                    "visual.externalVisualsEnabled",
+                    app.config().getBool("visual.externalVisualsEnabled", true)
+                        ? "false" : "true");
+            }
+
+            ImGui::Separator();
+
             if (ImGui::MenuItem("Display Toast Messages", "", app.config().getBool("projectM.displayToasts", true)))
             {
                 app.UserConfiguration()->setBool("projectM.displayToasts", !app.config().getBool("projectM.displayToasts", true));

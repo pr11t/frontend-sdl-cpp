@@ -402,6 +402,9 @@ const std::vector<ConfigOption>& ConfigOptions()
          "Target FPS used for projectM timing. 0 disables the frame limiter."},
         {"displayFps", "projectM.displayFps", ConfigType::Bool, 0.0, 0.0, 0.0,
          "Display measured FPS and frame time over the visualization."},
+        {"externalVisualsEnabled", "visual.externalVisualsEnabled", ConfigType::Bool,
+         0.0, 0.0, 1.0,
+         "Apply video, deck, and uploaded post-processing shader layers."},
         {"fullscreen", "window.fullscreen", ConfigType::Bool, 0.0, 0.0, 0.0,
          "Switch the window between fullscreen and windowed mode."},
     };

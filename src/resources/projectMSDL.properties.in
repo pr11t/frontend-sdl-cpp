@@ -59,6 +59,10 @@ window.uiScale = 1.0
 # zoom are then controlled through the HTTP API.
 visual.postProcessingEnabled = false
 
+# Live master switch for video, extra decks, and uploaded shader passes. Turning
+# this off preserves their state so they can be restored immediately.
+visual.externalVisualsEnabled = true
+
 # Number of independent projectM decks to run (1-4). Deck 0 is the visible base
 # output; extra decks are exposed to the post-processing shader chain as named
 # textures deck1, deck2, ... for compositing. Values above 1 require

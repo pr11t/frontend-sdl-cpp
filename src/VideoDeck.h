@@ -51,9 +51,13 @@ public:
     /// Creates the OpenGL pipeline and uploads the frame produced by Prepare().
     void InitializeGraphics();
 
-    /// Advances playback to @p nowMilliseconds (SDL_GetTicks) and uploads the current
-    /// frame to the texture. Loops back to the start at end-of-stream.
+    /// Advances playback to @p nowMilliseconds (SDL_GetTicks) and uploads the
+    /// current frame. Reports end-of-stream so the owner can perform a prepared
+    /// loop handoff.
     UpdateResult Update(std::uint32_t nowMilliseconds);
+
+    /// Pauses/resumes playback without accumulating catch-up time.
+    void SetPaused(bool paused, std::uint32_t nowMilliseconds);
 
     /**
      * @brief Replaces the exhausted decoder with an independently prepared
@@ -100,6 +104,8 @@ private:
     double _currentFramePts{-1.0}; //!< Presentation time (seconds) of the frame in _texture.
     std::uint32_t _startMilliseconds{0};
     bool _started{false};
+    bool _paused{false};
+    std::uint32_t _pauseStartedMilliseconds{0};
     bool _prepared{false};
 
     std::uint32_t _texture{0};
