@@ -510,6 +510,11 @@ thread. A successful replacement starts from the beginning and loops until
 another video is uploaded or playback is disabled. The current decoder remains
 active while the replacement loads and if FFmpeg cannot open it.
 
+Looping is pre-rolled: while a video plays, a second decoder prepares its first
+frame in the background. At end-of-stream the render loop swaps to that prepared
+decoder without reopening, seeking, or decoding catch-up frames on the render
+thread, then prepares the following loop.
+
 With post-processing enabled, the video is exposed as the named `video` texture
 and a built-in compositor pass is inserted before existing user passes. Deck 0
 continues to provide the projectM visualization. Without post-processing, the

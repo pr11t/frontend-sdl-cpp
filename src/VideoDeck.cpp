@@ -268,14 +268,7 @@ void VideoDeck::UploadCurrentFrame()
     UploadPixels();
 }
 
-void VideoDeck::SeekToStart()
-{
-    av_seek_frame(_formatContext, _videoStreamIndex, 0, AVSEEK_FLAG_BACKWARD);
-    avcodec_flush_buffers(_codecContext);
-    _currentFramePts = -1.0;
-}
-
-void VideoDeck::Update(std::uint32_t nowMilliseconds)
+VideoDeck::UpdateResult VideoDeck::Update(std::uint32_t nowMilliseconds)
 {
     if (!_started)
     {
@@ -295,15 +288,41 @@ void VideoDeck::Update(std::uint32_t nowMilliseconds)
         }
         if (!DecodeNextFrame())
         {
-            SeekToStart();
-            _startMilliseconds = nowMilliseconds;
-            if (!DecodeNextFrame())
-            {
-                break;
-            }
+            return UpdateResult::EndOfStream;
         }
         UploadCurrentFrame();
     }
+    return UpdateResult::Running;
+}
+
+void VideoDeck::RestartFromPrepared(VideoDeck& prepared, std::uint32_t nowMilliseconds)
+{
+    if (!prepared._prepared || prepared._texture != 0)
+    {
+        throw std::runtime_error(
+            "VideoDeck: loop successor must be prepared without graphics initialization.");
+    }
+    if (prepared._width != _width || prepared._height != _height)
+    {
+        throw std::runtime_error(
+            "VideoDeck: loop successor dimensions do not match the active texture.");
+    }
+
+    // Move the fresh decoder state into this live GL source. The exhausted
+    // state moves into prepared and is released when that object is destroyed.
+    std::swap(_formatContext, prepared._formatContext);
+    std::swap(_codecContext, prepared._codecContext);
+    std::swap(_swsContext, prepared._swsContext);
+    std::swap(_frame, prepared._frame);
+    std::swap(_packet, prepared._packet);
+    std::swap(_videoStreamIndex, prepared._videoStreamIndex);
+    std::swap(_timeBaseSeconds, prepared._timeBaseSeconds);
+    _rgba.swap(prepared._rgba);
+    std::swap(_currentFramePts, prepared._currentFramePts);
+
+    _startMilliseconds = nowMilliseconds;
+    _started = true;
+    UploadPixels();
 }
 
 void VideoDeck::RenderToScreen(int screenWidth, int screenHeight)

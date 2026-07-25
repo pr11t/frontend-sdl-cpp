@@ -18,6 +18,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 
 class ProjectMGUI;
 
@@ -61,6 +62,14 @@ protected:
 
     /// Activates a completed background video load without blocking the render loop.
     void PollVideoLoad();
+
+    /// Prepares and collects a second decoder used for a seamless loop handoff.
+    void QueueVideoLoopPreparation(std::string path);
+    void StartVideoLoopPreparation(
+        std::uint64_t generation, std::string path,
+        std::unique_ptr<VideoDeck> retiredVideo = nullptr);
+    void PollVideoLoopPreparation();
+    void RestartVideoLoop(std::uint32_t nowMilliseconds);
 
     /// Adds/replaces the built-in video compositing pass while preserving user passes.
     void EnsureVideoCompositePass();
@@ -125,6 +134,18 @@ protected:
     std::future<VideoLoadResult> _videoLoad;
     std::optional<VideoLoadRequest> _queuedVideoLoad;
     std::uint64_t _videoLoadGeneration{0};
+
+    struct VideoLoopResult
+    {
+        std::uint64_t generation{0};
+        std::unique_ptr<VideoDeck> video;
+        std::string error;
+    };
+
+    std::future<VideoLoopResult> _videoLoopLoad;
+    std::optional<std::pair<std::uint64_t, std::string>> _queuedVideoLoopLoad;
+    std::unique_ptr<VideoDeck> _videoLoopSuccessor;
+    std::uint64_t _videoLoopGeneration{0};
 
     projectm_handle _projectMHandle{nullptr};
     projectm_playlist_handle _playlistHandle{nullptr};

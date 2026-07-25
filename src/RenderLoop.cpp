@@ -87,6 +87,7 @@ void RenderLoop::Run()
             _networkControl.Videos().SetPlaying(
                 Poco::Path(pocVideoPath).getFileName(),
                 _videoDeck->Width(), _videoDeck->Height());
+            QueueVideoLoopPreparation(pocVideoPath);
         }
         catch (const std::exception& ex)
         {
@@ -121,12 +122,17 @@ void RenderLoop::Run()
 
         DrainNetworkCommands();
         PollVideoLoad();
+        PollVideoLoopPreparation();
         PollEvents();
         CheckViewportSize();
         _audioCapture.FillBuffer();
         if (_videoDeck)
         {
-            _videoDeck->Update(SDL_GetTicks()); // decode -> "video" texture each frame
+            const auto now = SDL_GetTicks();
+            if (_videoDeck->Update(now) == VideoDeck::UpdateResult::EndOfStream)
+            {
+                RestartVideoLoop(now);
+            }
         }
         if (_visualPostProcessor.Active())
         {
@@ -321,6 +327,7 @@ void RenderLoop::PollVideoLoad()
             EnsureVideoCompositePass();
         }
         _networkControl.Videos().SetPlaying(result.name, width, height);
+        QueueVideoLoopPreparation(_videoDeck->Path());
         poco_information_f1(_logger, "Runtime video playing: %s", result.name);
     }
     catch (const std::exception& error)
@@ -328,6 +335,102 @@ void RenderLoop::PollVideoLoad()
         _networkControl.Videos().SetError(result.name, error.what());
         poco_error_f2(_logger, "Runtime video failed (%s): %s",
                       result.name, std::string(error.what()));
+    }
+}
+
+void RenderLoop::QueueVideoLoopPreparation(std::string path)
+{
+    const auto generation = ++_videoLoopGeneration;
+    _videoLoopSuccessor.reset();
+
+    if (_videoLoopLoad.valid())
+    {
+        _queuedVideoLoopLoad = std::make_pair(generation, std::move(path));
+        return;
+    }
+
+    StartVideoLoopPreparation(generation, std::move(path));
+}
+
+void RenderLoop::StartVideoLoopPreparation(
+    std::uint64_t generation, std::string path,
+    std::unique_ptr<VideoDeck> retiredVideo)
+{
+    _videoLoopLoad = std::async(
+        std::launch::async,
+        [generation, path = std::move(path),
+         retiredVideo = std::move(retiredVideo)]() mutable {
+            VideoLoopResult result;
+            result.generation = generation;
+            try
+            {
+                // The previous FFmpeg decoder has no GL resources. Release it
+                // here so codec teardown cannot delay the loop-boundary frame.
+                retiredVideo.reset();
+                result.video = std::make_unique<VideoDeck>(std::move(path));
+                result.video->Prepare();
+            }
+            catch (const std::exception& error)
+            {
+                result.video.reset();
+                result.error = error.what();
+            }
+            return result;
+        });
+}
+
+void RenderLoop::PollVideoLoopPreparation()
+{
+    if (!_videoLoopLoad.valid() ||
+        _videoLoopLoad.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+    {
+        return;
+    }
+
+    auto result = _videoLoopLoad.get();
+    if (_queuedVideoLoopLoad)
+    {
+        auto next = std::move(*_queuedVideoLoopLoad);
+        _queuedVideoLoopLoad.reset();
+        StartVideoLoopPreparation(next.first, std::move(next.second));
+    }
+
+    if (result.generation != _videoLoopGeneration)
+    {
+        return;
+    }
+    if (!result.video)
+    {
+        poco_error_f1(_logger, "Could not prepare seamless video loop: %s",
+                      result.error);
+        return;
+    }
+
+    _videoLoopSuccessor = std::move(result.video);
+}
+
+void RenderLoop::RestartVideoLoop(std::uint32_t nowMilliseconds)
+{
+    if (!_videoDeck || !_videoLoopSuccessor)
+    {
+        // Keep the final frame visible. Preparation is normally complete long
+        // before EOF; if not, the handoff happens on a later render frame.
+        return;
+    }
+
+    try
+    {
+        const auto path = _videoDeck->Path();
+        auto retiredVideo = std::move(_videoLoopSuccessor);
+        _videoDeck->RestartFromPrepared(*retiredVideo, nowMilliseconds);
+        StartVideoLoopPreparation(
+            ++_videoLoopGeneration, path, std::move(retiredVideo));
+    }
+    catch (const std::exception& error)
+    {
+        _videoLoopSuccessor.reset();
+        poco_error_f1(_logger, "Seamless video loop handoff failed: %s",
+                      std::string(error.what()));
     }
 }
 
@@ -430,6 +533,9 @@ void RenderLoop::DrainNetworkCommands()
             case ControlCommandType::DisableVideo:
                 ++_videoLoadGeneration;
                 _queuedVideoLoad.reset();
+                ++_videoLoopGeneration;
+                _queuedVideoLoopLoad.reset();
+                _videoLoopSuccessor.reset();
                 _videoDeck.reset();
                 if (_visualPostProcessor.Active())
                 {

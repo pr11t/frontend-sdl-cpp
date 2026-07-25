@@ -63,6 +63,15 @@ int main(int argc, char** argv)
             deck.Update(SDL_GetTicks());
             deck.RenderToScreen(width, height);
         }
+
+        // Exercise the seamless-loop handoff independently of wall-clock video
+        // duration: the successor has FFmpeg state and its first RGBA frame,
+        // while the active deck keeps its existing OpenGL pipeline.
+        VideoDeck successor(argv[1]);
+        successor.Prepare();
+        deck.RestartFromPrepared(successor, SDL_GetTicks());
+        deck.RenderToScreen(width, height);
+
         deck.DumpScreen(argv[2], width, height);
         std::printf("poc_video_test: wrote %s (%dx%d)\n", argv[2], deck.Width(), deck.Height());
     }

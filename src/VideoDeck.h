@@ -29,6 +29,12 @@ struct SwsContext;
 class VideoDeck
 {
 public:
+    enum class UpdateResult
+    {
+        Running,
+        EndOfStream
+    };
+
     explicit VideoDeck(std::string path);
     ~VideoDeck();
 
@@ -47,7 +53,13 @@ public:
 
     /// Advances playback to @p nowMilliseconds (SDL_GetTicks) and uploads the current
     /// frame to the texture. Loops back to the start at end-of-stream.
-    void Update(std::uint32_t nowMilliseconds);
+    UpdateResult Update(std::uint32_t nowMilliseconds);
+
+    /**
+     * @brief Replaces the exhausted decoder with an independently prepared
+     * decoder for the same video, preserving the existing OpenGL pipeline.
+     */
+    void RestartFromPrepared(VideoDeck& prepared, std::uint32_t nowMilliseconds);
 
     /// Draws the current frame full-screen (aspect-fit, letterboxed) to the bound framebuffer.
     void RenderToScreen(int screenWidth, int screenHeight);
@@ -61,13 +73,13 @@ public:
 
     int Width() const { return _width; }
     int Height() const { return _height; }
+    const std::string& Path() const { return _path; }
 
 private:
     bool DecodeNextFrame();  //!< Fills _frame with the next decoded frame; false at EOF.
     void ConvertCurrentFrame(); //!< Converts _frame into _rgba without calling OpenGL.
     void UploadPixels(); //!< Uploads _rgba into _texture.
     void UploadCurrentFrame(); //!< Converts _frame and uploads it into _texture.
-    void SeekToStart();
     void CreatePipeline();   //!< Compiles the passthrough shader and creates the VAO.
     void Shutdown();
 
