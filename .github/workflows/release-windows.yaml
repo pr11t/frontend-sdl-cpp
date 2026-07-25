@@ -87,8 +87,10 @@ jobs:
             -DCMAKE_MSVC_RUNTIME_LIBRARY="MultiThreaded$<$<CONFIG:Debug>:Debug>DLL" `
             -DPRESET_DIRS="${{ github.workspace }}/presets-cream-of-the-crop" `
             -DTEXTURE_DIRS="${{ github.workspace }}/presets-milkdrop-texture-pack/textures" `
-            -DENABLE_INSTALL_BDEPS=ON
+            -DENABLE_INSTALL_BDEPS=ON `
+            -DENABLE_TESTING=ON
           cmake --build "${{ github.workspace }}/cmake-build-frontend-sdl2" --parallel --config Release
+          ctest --test-dir "${{ github.workspace }}/cmake-build-frontend-sdl2" -C Release --output-on-failure
 
       - name: Package projectMSDL
         run: |

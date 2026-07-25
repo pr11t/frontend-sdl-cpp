@@ -98,18 +98,61 @@ target_compile_definitions(projectMSDL
         PROJECTMSDL_VERSION="${PROJECT_VERSION}"
         )
 
-# POC: FFmpeg (from Homebrew) powers the video deck. Kept out of vcpkg on purpose
-# for a lean local build; resolved via find_path/find_library with brew hints.
-find_path(FFMPEG_INCLUDE_DIR libavcodec/avcodec.h
-        HINTS /opt/homebrew/opt/ffmpeg/include /usr/local/opt/ffmpeg/include /opt/homebrew/include /usr/local/include)
-find_library(FFMPEG_AVCODEC avcodec HINTS /opt/homebrew/opt/ffmpeg/lib /usr/local/opt/ffmpeg/lib)
-find_library(FFMPEG_AVFORMAT avformat HINTS /opt/homebrew/opt/ffmpeg/lib /usr/local/opt/ffmpeg/lib)
-find_library(FFMPEG_AVUTIL avutil HINTS /opt/homebrew/opt/ffmpeg/lib /usr/local/opt/ffmpeg/lib)
-find_library(FFMPEG_SWSCALE swscale HINTS /opt/homebrew/opt/ffmpeg/lib /usr/local/opt/ffmpeg/lib)
-if (NOT FFMPEG_INCLUDE_DIR OR NOT FFMPEG_AVCODEC OR NOT FFMPEG_AVFORMAT OR NOT FFMPEG_AVUTIL OR NOT FFMPEG_SWSCALE)
-    message(FATAL_ERROR "FFmpeg (avcodec/avformat/avutil/swscale) not found. Install it, e.g. 'brew install ffmpeg'.")
+# FFmpeg powers the video deck. vcpkg supplies FindFFMPEG on Windows and other
+# manifest builds. Pkg-config is the normal fallback for Homebrew/Linux.
+find_package(FFMPEG QUIET)
+if (FFMPEG_FOUND)
+    set(PROJECTMSDL_FFMPEG_LIBRARIES ${FFMPEG_LIBRARIES})
+    target_include_directories(projectMSDL PRIVATE ${FFMPEG_INCLUDE_DIRS})
+    if (FFMPEG_LIBRARY_DIRS)
+        target_link_directories(projectMSDL PRIVATE ${FFMPEG_LIBRARY_DIRS})
+    endif ()
+else ()
+    find_package(PkgConfig QUIET)
+    if (PkgConfig_FOUND)
+        pkg_check_modules(FFMPEG_PC QUIET IMPORTED_TARGET
+                libavformat
+                libavcodec
+                libswscale
+                libavutil
+                )
+    endif ()
+    if (TARGET PkgConfig::FFMPEG_PC)
+        set(PROJECTMSDL_FFMPEG_LIBRARIES PkgConfig::FFMPEG_PC)
+    else ()
+        # Last-resort support for conventional local installations without
+        # pkg-config metadata.
+        find_path(FFMPEG_INCLUDE_DIR libavcodec/avcodec.h
+                HINTS
+                /opt/homebrew/opt/ffmpeg/include
+                /usr/local/opt/ffmpeg/include
+                /opt/homebrew/include
+                /usr/local/include
+                )
+        find_library(FFMPEG_AVCODEC avcodec
+                HINTS /opt/homebrew/opt/ffmpeg/lib /usr/local/opt/ffmpeg/lib)
+        find_library(FFMPEG_AVFORMAT avformat
+                HINTS /opt/homebrew/opt/ffmpeg/lib /usr/local/opt/ffmpeg/lib)
+        find_library(FFMPEG_AVUTIL avutil
+                HINTS /opt/homebrew/opt/ffmpeg/lib /usr/local/opt/ffmpeg/lib)
+        find_library(FFMPEG_SWSCALE swscale
+                HINTS /opt/homebrew/opt/ffmpeg/lib /usr/local/opt/ffmpeg/lib)
+        if (NOT FFMPEG_INCLUDE_DIR OR NOT FFMPEG_AVCODEC OR NOT FFMPEG_AVFORMAT
+                OR NOT FFMPEG_AVUTIL OR NOT FFMPEG_SWSCALE)
+            message(FATAL_ERROR
+                    "FFmpeg (avcodec/avformat/avutil/swscale) not found. "
+                    "Use the vcpkg manifest or install FFmpeg with pkg-config metadata."
+                    )
+        endif ()
+        target_include_directories(projectMSDL PRIVATE ${FFMPEG_INCLUDE_DIR})
+        set(PROJECTMSDL_FFMPEG_LIBRARIES
+                ${FFMPEG_AVFORMAT}
+                ${FFMPEG_AVCODEC}
+                ${FFMPEG_SWSCALE}
+                ${FFMPEG_AVUTIL}
+                )
+    endif ()
 endif ()
-target_include_directories(projectMSDL PRIVATE ${FFMPEG_INCLUDE_DIR})
 
 target_link_libraries(projectMSDL
         PRIVATE
@@ -122,10 +165,7 @@ target_link_libraries(projectMSDL
         SDL2::SDL2$<$<STREQUAL:${SDL2_LINKAGE},static>:-static>
         SDL2::SDL2main
         OpenGL::$<IF:$<BOOL:${ENABLE_GLES}>,GLES3,GL>
-        ${FFMPEG_AVFORMAT}
-        ${FFMPEG_AVCODEC}
-        ${FFMPEG_SWSCALE}
-        ${FFMPEG_AVUTIL}
+        ${PROJECTMSDL_FFMPEG_LIBRARIES}
         )
 
 if (MSVC)
@@ -142,7 +182,15 @@ add_executable(poc_video_test
         VideoDeck.h
         poc_video_test.cpp
         )
-target_include_directories(poc_video_test PRIVATE ${FFMPEG_INCLUDE_DIR} ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(poc_video_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+if (FFMPEG_FOUND)
+    target_include_directories(poc_video_test PRIVATE ${FFMPEG_INCLUDE_DIRS})
+    if (FFMPEG_LIBRARY_DIRS)
+        target_link_directories(poc_video_test PRIVATE ${FFMPEG_LIBRARY_DIRS})
+    endif ()
+elseif (FFMPEG_INCLUDE_DIR)
+    target_include_directories(poc_video_test PRIVATE ${FFMPEG_INCLUDE_DIR})
+endif ()
 target_link_libraries(poc_video_test
         PRIVATE
         Poco::Foundation
@@ -150,10 +198,7 @@ target_link_libraries(poc_video_test
         SDL2::SDL2$<$<STREQUAL:${SDL2_LINKAGE},static>:-static>
         SDL2::SDL2main
         OpenGL::$<IF:$<BOOL:${ENABLE_GLES}>,GLES3,GL>
-        ${FFMPEG_AVFORMAT}
-        ${FFMPEG_AVCODEC}
-        ${FFMPEG_SWSCALE}
-        ${FFMPEG_AVUTIL}
+        ${PROJECTMSDL_FFMPEG_LIBRARIES}
         )
 if (PROJECTMSDL_GLEW_TARGET)
     target_compile_definitions(poc_video_test PRIVATE USE_GLEW)
@@ -165,7 +210,15 @@ add_executable(poc_demo
         VideoDeck.h
         poc_demo.cpp
         )
-target_include_directories(poc_demo PRIVATE ${FFMPEG_INCLUDE_DIR} ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(poc_demo PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+if (FFMPEG_FOUND)
+    target_include_directories(poc_demo PRIVATE ${FFMPEG_INCLUDE_DIRS})
+    if (FFMPEG_LIBRARY_DIRS)
+        target_link_directories(poc_demo PRIVATE ${FFMPEG_LIBRARY_DIRS})
+    endif ()
+elseif (FFMPEG_INCLUDE_DIR)
+    target_include_directories(poc_demo PRIVATE ${FFMPEG_INCLUDE_DIR})
+endif ()
 target_link_libraries(poc_demo
         PRIVATE
         Poco::Foundation
@@ -174,10 +227,7 @@ target_link_libraries(poc_demo
         SDL2::SDL2$<$<STREQUAL:${SDL2_LINKAGE},static>:-static>
         SDL2::SDL2main
         OpenGL::$<IF:$<BOOL:${ENABLE_GLES}>,GLES3,GL>
-        ${FFMPEG_AVFORMAT}
-        ${FFMPEG_AVCODEC}
-        ${FFMPEG_SWSCALE}
-        ${FFMPEG_AVUTIL}
+        ${PROJECTMSDL_FFMPEG_LIBRARIES}
         )
 if (PROJECTMSDL_GLEW_TARGET)
     target_compile_definitions(poc_demo PRIVATE USE_GLEW)

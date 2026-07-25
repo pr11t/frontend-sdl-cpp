@@ -14,6 +14,16 @@ install(FILES ${PROJECTM_CONFIGURATION_FILE}
         )
 
 if(ENABLE_INSTALL_BDEPS)
+    set(PROJECTMSDL_RUNTIME_DEPENDENCY_SEARCH_ARGS)
+    if(WIN32 AND VCPKG_INSTALLED_DIR AND VCPKG_TARGET_TRIPLET)
+        # CMake's Windows dependency scanner needs an explicit directory in
+        # which to resolve DLL names imported through .lib files.
+        list(APPEND PROJECTMSDL_RUNTIME_DEPENDENCY_SEARCH_ARGS
+                DIRECTORIES
+                "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/bin"
+                )
+    endif()
+
     install(RUNTIME_DEPENDENCY_SET projectMSDLDepends
             COMPONENT projectMSDL
 
@@ -27,6 +37,7 @@ if(ENABLE_INSTALL_BDEPS)
             PRE_EXCLUDE_REGEXES
             ".*api-ms-win-crt-.*\\.dll"
 
+            ${PROJECTMSDL_RUNTIME_DEPENDENCY_SEARCH_ARGS}
             LIBRARY DESTINATION ${PROJECTMSDL_LIB_DIR}
             RUNTIME DESTINATION ${PROJECTMSDL_LIB_DIR}
             FRAMEWORK DESTINATION ${PROJECTMSDL_DATA_DIR}
@@ -71,11 +82,16 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin" AND NOT ENABLE_FLAT_PACKAGE)
             COMPONENT projectMSDL
             )
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Windows")
-        install(IMPORTED_RUNTIME_ARTIFACTS projectMSDL
-                LIBRARY DESTINATION ${PROJECTMSDL_BIN_DIR}
-                RUNTIME DESTINATION ${PROJECTMSDL_BIN_DIR}
+    # Preserve the dependency license notice in portable ZIP/MSI packages.
+    if(VCPKG_INSTALLED_DIR AND VCPKG_TARGET_TRIPLET AND
+            EXISTS "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/share/ffmpeg/copyright")
+        install(FILES
+                "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/share/ffmpeg/copyright"
+                DESTINATION "licenses"
+                RENAME "ffmpeg.txt"
                 COMPONENT projectMSDL
                 )
+    endif()
 endif()
 
 # Install optional presets
