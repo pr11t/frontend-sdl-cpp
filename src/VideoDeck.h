@@ -21,8 +21,10 @@ struct SwsContext;
  * be exposed to the shader-chain compositor as a named deck texture. Compositing
  * / "make it look nice" is intentionally out of scope for this POC.
  *
- * All GL calls (Initialize/Update/RenderToScreen/Shutdown) must run on the
- * render thread with the GL context current.
+ * Prepare() performs FFmpeg work only and may run on a worker thread.
+ * InitializeGraphics(), Update(), RenderToScreen(), and destruction after
+ * graphics initialization must run on the render thread with the GL context
+ * current.
  */
 class VideoDeck
 {
@@ -33,8 +35,15 @@ public:
     VideoDeck(const VideoDeck&) = delete;
     VideoDeck& operator=(const VideoDeck&) = delete;
 
-    /// Opens the file, sets up the decoder and the GL texture/shader. Throws on failure.
+    /// Convenience startup path: prepares the decoder and initializes graphics.
     void Initialize();
+
+    /// Opens FFmpeg, initializes decoding/scaling, and decodes the first RGBA frame.
+    /// Does not call OpenGL and may run on a background thread.
+    void Prepare();
+
+    /// Creates the OpenGL pipeline and uploads the frame produced by Prepare().
+    void InitializeGraphics();
 
     /// Advances playback to @p nowMilliseconds (SDL_GetTicks) and uploads the current
     /// frame to the texture. Loops back to the start at end-of-stream.
@@ -55,7 +64,9 @@ public:
 
 private:
     bool DecodeNextFrame();  //!< Fills _frame with the next decoded frame; false at EOF.
-    void UploadCurrentFrame(); //!< Converts _frame to RGBA and uploads into _texture.
+    void ConvertCurrentFrame(); //!< Converts _frame into _rgba without calling OpenGL.
+    void UploadPixels(); //!< Uploads _rgba into _texture.
+    void UploadCurrentFrame(); //!< Converts _frame and uploads it into _texture.
     void SeekToStart();
     void CreatePipeline();   //!< Compiles the passthrough shader and creates the VAO.
     void Shutdown();
@@ -77,6 +88,7 @@ private:
     double _currentFramePts{-1.0}; //!< Presentation time (seconds) of the frame in _texture.
     std::uint32_t _startMilliseconds{0};
     bool _started{false};
+    bool _prepared{false};
 
     std::uint32_t _texture{0};
     std::uint32_t _program{0};

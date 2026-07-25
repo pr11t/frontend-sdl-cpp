@@ -13,7 +13,11 @@
 #include <Poco/NObserver.h>
 #include <Poco/Notification.h>
 
+#include <cstdint>
+#include <future>
 #include <memory>
+#include <optional>
+#include <string>
 
 class ProjectMGUI;
 
@@ -51,6 +55,12 @@ protected:
      * @brief Executes remote-control commands on the render thread.
      */
     void DrainNetworkCommands();
+
+    /// Starts or supersedes a background FFmpeg video-preparation request.
+    void QueueVideoLoad(std::string name, std::string path);
+
+    /// Activates a completed background video load without blocking the render loop.
+    void PollVideoLoad();
 
     /// Adds/replaces the built-in video compositing pass while preserving user passes.
     void EnsureVideoCompositePass();
@@ -94,6 +104,27 @@ protected:
     NetworkControlSubsystem& _networkControl;
     VisualPostProcessor _visualPostProcessor;
     std::unique_ptr<VideoDeck> _videoDeck; //!< POC: when set (--pocVideo), renders a video instead of projectM.
+
+    struct VideoLoadRequest
+    {
+        std::uint64_t generation{0};
+        std::string name;
+        std::string path;
+    };
+
+    struct VideoLoadResult
+    {
+        std::uint64_t generation{0};
+        std::string name;
+        std::unique_ptr<VideoDeck> video;
+        std::string error;
+    };
+
+    void StartVideoLoad(VideoLoadRequest request);
+
+    std::future<VideoLoadResult> _videoLoad;
+    std::optional<VideoLoadRequest> _queuedVideoLoad;
+    std::uint64_t _videoLoadGeneration{0};
 
     projectm_handle _projectMHandle{nullptr};
     projectm_playlist_handle _playlistHandle{nullptr};

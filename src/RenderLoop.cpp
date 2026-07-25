@@ -16,7 +16,10 @@
 #include "network/TextureStore.h"
 
 #include <algorithm>
+#include <chrono>
+#include <future>
 #include <map>
+#include <stdexcept>
 #include <string>
 #include <utility>
 
@@ -117,6 +120,7 @@ void RenderLoop::Run()
         limiter.StartFrame();
 
         DrainNetworkCommands();
+        PollVideoLoad();
         PollEvents();
         CheckViewportSize();
         _audioCapture.FillBuffer();
@@ -232,6 +236,101 @@ void RenderLoop::RemoveVideoCompositePass()
     _networkControl.Shaders().SetChain(std::move(chain));
 }
 
+void RenderLoop::QueueVideoLoad(std::string name, std::string path)
+{
+    VideoLoadRequest request{
+        ++_videoLoadGeneration,
+        std::move(name),
+        std::move(path)
+    };
+
+    if (_videoLoad.valid())
+    {
+        // Keep only the newest waiting request. The active FFmpeg open cannot
+        // be cancelled safely, but its result will be discarded by generation.
+        _queuedVideoLoad = std::move(request);
+        return;
+    }
+
+    StartVideoLoad(std::move(request));
+}
+
+void RenderLoop::StartVideoLoad(VideoLoadRequest request)
+{
+    _videoLoad = std::async(
+        std::launch::async,
+        [request = std::move(request)]() mutable {
+            VideoLoadResult result;
+            result.generation = request.generation;
+            result.name = std::move(request.name);
+            try
+            {
+                result.video = std::make_unique<VideoDeck>(std::move(request.path));
+                result.video->Prepare();
+            }
+            catch (const std::exception& error)
+            {
+                result.video.reset();
+                result.error = error.what();
+            }
+            return result;
+        });
+}
+
+void RenderLoop::PollVideoLoad()
+{
+    if (!_videoLoad.valid() ||
+        _videoLoad.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+    {
+        return;
+    }
+
+    auto result = _videoLoad.get();
+
+    // If another request arrived while this one was preparing, never briefly
+    // activate the stale video. Start only the latest queued request.
+    if (_queuedVideoLoad)
+    {
+        auto next = std::move(*_queuedVideoLoad);
+        _queuedVideoLoad.reset();
+        StartVideoLoad(std::move(next));
+    }
+
+    if (result.generation != _videoLoadGeneration)
+    {
+        return;
+    }
+
+    try
+    {
+        if (!result.video)
+        {
+            throw std::runtime_error(result.error.empty()
+                                         ? "Unknown video preparation error."
+                                         : result.error);
+        }
+
+        // OpenGL remains on the render thread. FFmpeg opening, probing,
+        // decoder/scaler allocation, and first-frame decoding are already done.
+        result.video->InitializeGraphics();
+        const int width = result.video->Width();
+        const int height = result.video->Height();
+        _videoDeck = std::move(result.video);
+        if (_visualPostProcessor.Active())
+        {
+            EnsureVideoCompositePass();
+        }
+        _networkControl.Videos().SetPlaying(result.name, width, height);
+        poco_information_f1(_logger, "Runtime video playing: %s", result.name);
+    }
+    catch (const std::exception& error)
+    {
+        _networkControl.Videos().SetError(result.name, error.what());
+        poco_error_f2(_logger, "Runtime video failed (%s): %s",
+                      result.name, std::string(error.what()));
+    }
+}
+
 void RenderLoop::DrainNetworkCommands()
 {
     constexpr std::size_t maxCommandsPerFrame = 32;
@@ -325,33 +424,12 @@ void RenderLoop::DrainNetworkCommands()
                 continue;
 
             case ControlCommandType::LoadVideo:
-                try
-                {
-                    // Initialize the replacement completely before releasing the
-                    // current decoder, so a failed upload does not stop playback.
-                    auto replacement = std::make_unique<VideoDeck>(command.payload);
-                    replacement->Initialize();
-                    const int width = replacement->Width();
-                    const int height = replacement->Height();
-                    _videoDeck = std::move(replacement);
-                    if (_visualPostProcessor.Active())
-                    {
-                        EnsureVideoCompositePass();
-                    }
-                    _networkControl.Videos().SetPlaying(
-                        command.resourceName, width, height);
-                    poco_information_f1(_logger, "Runtime video playing: %s",
-                                        command.resourceName);
-                }
-                catch (const std::exception& error)
-                {
-                    _networkControl.Videos().SetError(command.resourceName, error.what());
-                    poco_error_f2(_logger, "Runtime video failed (%s): %s",
-                                  command.resourceName, std::string(error.what()));
-                }
+                QueueVideoLoad(command.resourceName, command.payload);
                 continue;
 
             case ControlCommandType::DisableVideo:
+                ++_videoLoadGeneration;
+                _queuedVideoLoad.reset();
                 _videoDeck.reset();
                 if (_visualPostProcessor.Active())
                 {

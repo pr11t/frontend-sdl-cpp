@@ -503,10 +503,12 @@ curl -s -X PUT \
   http://127.0.0.1:8080/api/v1/videos/background.mp4
 ```
 
-Uploading automatically queues the video on the render thread. A successful
-replacement starts from the beginning and loops until another video is
-uploaded or playback is disabled. The current decoder remains active if FFmpeg
-cannot open the replacement.
+Uploading starts video preparation on a worker thread. FFmpeg opening, stream
+probing, decoder/scaler setup, and first-frame conversion do not block
+rendering; only creation and upload of the OpenGL texture happen on the render
+thread. A successful replacement starts from the beginning and loops until
+another video is uploaded or playback is disabled. The current decoder remains
+active while the replacement loads and if FFmpeg cannot open it.
 
 With post-processing enabled, the video is exposed as the named `video` texture
 and a built-in compositor pass is inserted before existing user passes. Deck 0

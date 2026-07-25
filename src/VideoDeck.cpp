@@ -88,6 +88,17 @@ VideoDeck::~VideoDeck()
 
 void VideoDeck::Initialize()
 {
+    Prepare();
+    InitializeGraphics();
+}
+
+void VideoDeck::Prepare()
+{
+    if (_prepared)
+    {
+        return;
+    }
+
     if (avformat_open_input(&_formatContext, _path.c_str(), nullptr, nullptr) != 0)
     {
         throw std::runtime_error("VideoDeck: could not open input '" + _path + "'.");
@@ -138,7 +149,29 @@ void VideoDeck::Initialize()
         throw std::runtime_error("VideoDeck: out of memory allocating FFmpeg frames.");
     }
 
+    if (!DecodeNextFrame())
+    {
+        throw std::runtime_error("VideoDeck: could not decode the first video frame.");
+    }
+    ConvertCurrentFrame();
+    _prepared = true;
+
+    poco_information_f3(_logger, "VideoDeck prepared: %s (%dx%d)", _path, _width, _height);
+}
+
+void VideoDeck::InitializeGraphics()
+{
+    if (!_prepared)
+    {
+        throw std::runtime_error("VideoDeck: Prepare() must be called before InitializeGraphics().");
+    }
+    if (_texture != 0)
+    {
+        return;
+    }
+
     CreatePipeline();
+    UploadPixels();
 
     poco_information_f3(_logger, "VideoDeck ready: %s (%dx%d)", _path, _width, _height);
 }
@@ -210,20 +243,29 @@ bool VideoDeck::DecodeNextFrame()
     }
 }
 
-void VideoDeck::UploadCurrentFrame()
+void VideoDeck::ConvertCurrentFrame()
 {
     std::uint8_t* destData[4] = {_rgba.data(), nullptr, nullptr, nullptr};
     int destLineSize[4] = {_width * 4, 0, 0, 0};
     sws_scale(_swsContext, _frame->data, _frame->linesize, 0, _height, destData, destLineSize);
 
+    const double pts = static_cast<double>(_frame->best_effort_timestamp) * _timeBaseSeconds;
+    _currentFramePts = pts < 0.0 ? _currentFramePts + 1.0 / 30.0 : pts;
+    av_frame_unref(_frame);
+}
+
+void VideoDeck::UploadPixels()
+{
     glBindTexture(GL_TEXTURE_2D, _texture);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, _width, _height, GL_RGBA, GL_UNSIGNED_BYTE, _rgba.data());
     glBindTexture(GL_TEXTURE_2D, 0);
+}
 
-    const double pts = static_cast<double>(_frame->best_effort_timestamp) * _timeBaseSeconds;
-    _currentFramePts = pts < 0.0 ? _currentFramePts + 1.0 / 30.0 : pts;
-    av_frame_unref(_frame);
+void VideoDeck::UploadCurrentFrame()
+{
+    ConvertCurrentFrame();
+    UploadPixels();
 }
 
 void VideoDeck::SeekToStart()
