@@ -488,7 +488,7 @@ the application exits. Each upload is limited to 256 MiB.
 ### Upload and play
 
 ```http
-PUT /api/v1/videos/{name}
+PUT /api/v1/videos/{name}?fit=cover&scale=1&offsetX=0&offsetY=0
 Content-Type: video/mp4
 ```
 
@@ -496,11 +496,19 @@ The name must be 1–128 characters of `[A-Za-z0-9_.-]`. The request body is the
 complete video file. Any format supported by the linked FFmpeg build can be
 used; the extension should match the container.
 
+Video layout is applied before the first decoded frame is shown:
+
+| Query option | Values |
+| --- | --- |
+| `fit` | `cover` (default, preserve aspect and crop), `contain` (preserve aspect with empty margins), or `stretch` |
+| `scale` | `0.1`–`10`; default `1` |
+| `offsetX`, `offsetY` | `-1`–`1`; default `0` |
+
 ```sh
 curl -s -X PUT \
   -H 'Content-Type: video/mp4' \
   --data-binary @background.mp4 \
-  http://127.0.0.1:8080/api/v1/videos/background.mp4
+  'http://127.0.0.1:8080/api/v1/videos/background.mp4?fit=cover'
 ```
 
 Uploading starts video preparation on a worker thread. FFmpeg opening, stream
@@ -557,9 +565,35 @@ also include the decoded dimensions:
   "state": "playing",
   "name": "background.mp4",
   "width": 1920,
-  "height": 1080
+  "height": 1080,
+  "layout": {
+    "fit": "cover",
+    "scale": 1,
+    "offsetX": 0,
+    "offsetY": 0
+  }
 }
 ```
+
+Change the active video layout without reloading or restarting playback:
+
+```http
+PATCH /api/v1/video
+Content-Type: application/json
+```
+
+```json
+{
+  "fit": "contain",
+  "scale": 1,
+  "offsetX": 0,
+  "offsetY": 0
+}
+```
+
+All fields are optional, but at least one is required. The updated layout is
+also retained when that stored upload is loaded again. Upload/load query
+options override the stored layout before playback starts.
 
 Disable playback without removing stored uploads:
 

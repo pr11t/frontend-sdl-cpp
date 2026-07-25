@@ -24,6 +24,7 @@ add_library(ProjectMSDL-Network STATIC
         TextureStore.h
         VideoStore.cpp
         VideoStore.h
+        VideoLayout.h
         VisualState.cpp
         VisualState.h
         )

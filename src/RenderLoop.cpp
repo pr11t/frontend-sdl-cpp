@@ -86,7 +86,7 @@ void RenderLoop::Run()
             _videoDeck->Initialize();
             _networkControl.Videos().SetPlaying(
                 Poco::Path(pocVideoPath).getFileName(),
-                _videoDeck->Width(), _videoDeck->Height());
+                _videoDeck->Width(), _videoDeck->Height(), _videoLayout);
             QueueVideoLoopPreparation(pocVideoPath);
         }
         catch (const std::exception& ex)
@@ -212,9 +212,34 @@ void RenderLoop::EnsureVideoCompositePass()
     constexpr auto shaderName = "pocVideoComposite";
     _networkControl.Shaders().SetShader(shaderName, std::string(
         "uniform float videoLevel;\n"
+        "uniform float videoAspect;\n"
+        "uniform float videoFit;\n"
+        "uniform float videoScale;\n"
+        "uniform float videoOffsetX;\n"
+        "uniform float videoOffsetY;\n"
         "vec4 effect(vec2 uv){\n"
         "  vec3 base = texture(uInput, uv).rgb;\n"
-        "  vec3 vid = texture(uTexture, vec2(uv.x, 1.0 - uv.y)).rgb;\n"
+        "  float screenAspect = uResolution.x / max(uResolution.y, 1.0);\n"
+        "  float relativeAspect = videoAspect / max(screenAspect, 0.0001);\n"
+        "  vec2 videoUv = uv;\n"
+        "  if (videoFit > 0.5 && videoFit < 1.5) {\n"
+        "    if (relativeAspect > 1.0)\n"
+        "      videoUv.x = 0.5 + (uv.x - 0.5) / relativeAspect;\n"
+        "    else\n"
+        "      videoUv.y = 0.5 + (uv.y - 0.5) * relativeAspect;\n"
+        "  } else if (videoFit >= 1.5) {\n"
+        "    if (relativeAspect > 1.0)\n"
+        "      videoUv.y = 0.5 + (uv.y - 0.5) * relativeAspect;\n"
+        "    else\n"
+        "      videoUv.x = 0.5 + (uv.x - 0.5) / max(relativeAspect, 0.0001);\n"
+        "  }\n"
+        "  videoUv = 0.5 + (videoUv - 0.5) / max(videoScale, 0.0001);\n"
+        "  videoUv -= vec2(videoOffsetX, videoOffsetY);\n"
+        "  bool inside = all(greaterThanEqual(videoUv, vec2(0.0))) &&\n"
+        "                all(lessThanEqual(videoUv, vec2(1.0)));\n"
+        "  vec3 vid = inside\n"
+        "    ? texture(uTexture, vec2(videoUv.x, 1.0 - videoUv.y)).rgb\n"
+        "    : vec3(0.0);\n"
         "  vec3 o = vid * videoLevel + base;\n"
         "  return vec4(min(o, vec3(1.0)), 1.0);\n"
         "}\n"));
@@ -231,6 +256,18 @@ void RenderLoop::EnsureVideoCompositePass()
     videoPass.shader = shaderName;
     videoPass.texture = "video";
     videoPass.params["videoLevel"] = 0.7F;
+    videoPass.params["videoAspect"] =
+        _videoDeck && _videoDeck->Height() > 0
+            ? static_cast<float>(_videoDeck->Width()) /
+                  static_cast<float>(_videoDeck->Height())
+            : 1.0F;
+    videoPass.params["videoFit"] =
+        _videoLayout.fit == VideoFit::Stretch
+            ? 0.0F
+            : (_videoLayout.fit == VideoFit::Cover ? 1.0F : 2.0F);
+    videoPass.params["videoScale"] = _videoLayout.scale;
+    videoPass.params["videoOffsetX"] = _videoLayout.offsetX;
+    videoPass.params["videoOffsetY"] = _videoLayout.offsetY;
     chain.insert(chain.begin(), std::move(videoPass));
     _networkControl.Shaders().SetChain(std::move(chain));
 }
@@ -251,12 +288,14 @@ void RenderLoop::RemoveVideoCompositePass()
     _networkControl.Shaders().SetChain(std::move(chain));
 }
 
-void RenderLoop::QueueVideoLoad(std::string name, std::string path)
+void RenderLoop::QueueVideoLoad(std::string name, std::string path,
+                                VideoLayout layout)
 {
     VideoLoadRequest request{
         ++_videoLoadGeneration,
         std::move(name),
-        std::move(path)
+        std::move(path),
+        layout
     };
 
     if (_videoLoad.valid())
@@ -278,6 +317,7 @@ void RenderLoop::StartVideoLoad(VideoLoadRequest request)
             VideoLoadResult result;
             result.generation = request.generation;
             result.name = std::move(request.name);
+            result.layout = request.layout;
             try
             {
                 result.video = std::make_unique<VideoDeck>(std::move(request.path));
@@ -331,11 +371,15 @@ void RenderLoop::PollVideoLoad()
         const int width = result.video->Width();
         const int height = result.video->Height();
         _videoDeck = std::move(result.video);
+        const auto playback = _networkControl.Videos().GetPlayback();
+        _videoLayout =
+            playback.name == result.name ? playback.layout : result.layout;
         if (_visualPostProcessor.Active())
         {
             EnsureVideoCompositePass();
         }
-        _networkControl.Videos().SetPlaying(result.name, width, height);
+        _networkControl.Videos().SetPlaying(
+            result.name, width, height, _videoLayout);
         QueueVideoLoopPreparation(_videoDeck->Path());
         poco_information_f1(_logger, "Runtime video playing: %s", result.name);
     }
@@ -536,7 +580,16 @@ void RenderLoop::DrainNetworkCommands()
                 continue;
 
             case ControlCommandType::LoadVideo:
-                QueueVideoLoad(command.resourceName, command.payload);
+                QueueVideoLoad(command.resourceName, command.payload,
+                               command.videoLayout);
+                continue;
+
+            case ControlCommandType::UpdateVideoLayout:
+                _videoLayout = command.videoLayout;
+                if (_videoDeck && _visualPostProcessor.Active())
+                {
+                    EnsureVideoCompositePass();
+                }
                 continue;
 
             case ControlCommandType::DisableVideo:

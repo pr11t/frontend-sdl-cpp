@@ -32,7 +32,8 @@ VideoStore::~VideoStore()
     }
 }
 
-VideoStore::Entry VideoStore::Set(const std::string& name, const std::string& bytes)
+VideoStore::Entry VideoStore::Set(const std::string& name, const std::string& bytes,
+                                  VideoLayout layout)
 {
     const auto unique = Poco::UUIDGenerator::defaultGenerator().createRandom().toString();
     const auto path = Poco::Path(_directory).append(unique + "-" + name).toString();
@@ -50,7 +51,7 @@ VideoStore::Entry VideoStore::Set(const std::string& name, const std::string& by
         }
     }
 
-    Entry entry{name, path, bytes.size()};
+    Entry entry{name, path, bytes.size(), layout};
     std::lock_guard<std::mutex> lock(_mutex);
     const auto existing = std::find_if(
         _entries.begin(), _entries.end(),
@@ -66,6 +67,20 @@ VideoStore::Entry VideoStore::Set(const std::string& name, const std::string& by
         *existing = entry;
     }
     return entry;
+}
+
+bool VideoStore::SetLayout(const std::string& name, VideoLayout layout)
+{
+    std::lock_guard<std::mutex> lock(_mutex);
+    const auto existing = std::find_if(
+        _entries.begin(), _entries.end(),
+        [&](const Entry& item) { return item.name == name; });
+    if (existing == _entries.end())
+    {
+        return false;
+    }
+    existing->layout = layout;
+    return true;
 }
 
 bool VideoStore::Remove(const std::string& name)
@@ -142,22 +157,29 @@ std::vector<VideoStore::Entry> VideoStore::List() const
     return _entries;
 }
 
-void VideoStore::SetLoading(const std::string& name)
+void VideoStore::SetLoading(const std::string& name, VideoLayout layout)
 {
     std::lock_guard<std::mutex> lock(_mutex);
-    _playback = {"loading", name, "", 0, 0};
+    _playback = {"loading", name, "", 0, 0, layout};
 }
 
-void VideoStore::SetPlaying(const std::string& name, int width, int height)
+void VideoStore::SetPlaying(const std::string& name, int width, int height,
+                            VideoLayout layout)
 {
     std::lock_guard<std::mutex> lock(_mutex);
-    _playback = {"playing", name, "", width, height};
+    _playback = {"playing", name, "", width, height, layout};
+}
+
+void VideoStore::UpdatePlaybackLayout(VideoLayout layout)
+{
+    std::lock_guard<std::mutex> lock(_mutex);
+    _playback.layout = layout;
 }
 
 void VideoStore::SetError(const std::string& name, const std::string& error)
 {
     std::lock_guard<std::mutex> lock(_mutex);
-    _playback = {"error", name, error, 0, 0};
+    _playback = {"error", name, error, 0, 0, {}};
 }
 
 void VideoStore::SetDisabled()

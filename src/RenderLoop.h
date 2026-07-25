@@ -58,7 +58,7 @@ protected:
     void DrainNetworkCommands();
 
     /// Starts or supersedes a background FFmpeg video-preparation request.
-    void QueueVideoLoad(std::string name, std::string path);
+    void QueueVideoLoad(std::string name, std::string path, VideoLayout layout);
 
     /// Activates a completed background video load without blocking the render loop.
     void PollVideoLoad();
@@ -119,6 +119,7 @@ protected:
         std::uint64_t generation{0};
         std::string name;
         std::string path;
+        VideoLayout layout;
     };
 
     struct VideoLoadResult
@@ -127,6 +128,7 @@ protected:
         std::string name;
         std::unique_ptr<VideoDeck> video;
         std::string error;
+        VideoLayout layout;
     };
 
     void StartVideoLoad(VideoLoadRequest request);
@@ -134,6 +136,7 @@ protected:
     std::future<VideoLoadResult> _videoLoad;
     std::optional<VideoLoadRequest> _queuedVideoLoad;
     std::uint64_t _videoLoadGeneration{0};
+    VideoLayout _videoLayout;
 
     struct VideoLoopResult
     {

@@ -424,6 +424,125 @@ std::string QueryValue(const Poco::URI& uri, const std::string& key, const std::
     return fallback;
 }
 
+bool ParseVideoFit(const std::string& value, VideoFit& fit)
+{
+    if (value == "stretch") { fit = VideoFit::Stretch; return true; }
+    if (value == "cover") { fit = VideoFit::Cover; return true; }
+    if (value == "contain") { fit = VideoFit::Contain; return true; }
+    return false;
+}
+
+const char* VideoFitName(VideoFit fit)
+{
+    switch (fit)
+    {
+        case VideoFit::Stretch: return "stretch";
+        case VideoFit::Cover: return "cover";
+        case VideoFit::Contain: return "contain";
+    }
+    return "cover";
+}
+
+Poco::JSON::Object VideoLayoutJson(const VideoLayout& layout)
+{
+    Poco::JSON::Object result;
+    result.set("fit", VideoFitName(layout.fit));
+    result.set("scale", layout.scale);
+    result.set("offsetX", layout.offsetX);
+    result.set("offsetY", layout.offsetY);
+    return result;
+}
+
+bool ParseVideoLayoutObject(const Poco::JSON::Object::Ptr& object,
+                            VideoLayout& layout,
+                            Poco::Net::HTTPServerResponse& response)
+{
+    if (!Fields(object, {"fit", "scale", "offsetX", "offsetY"}, response))
+    {
+        return false;
+    }
+    if (object->has("fit"))
+    {
+        if (!object->get("fit").isString() ||
+            !ParseVideoFit(object->getValue<std::string>("fit"), layout.fit))
+        {
+            WriteError(response, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
+                       "invalid_request", "fit must be stretch, cover, or contain.");
+            return false;
+        }
+    }
+    for (const auto* field : {"scale", "offsetX", "offsetY"})
+    {
+        if (!object->has(field))
+        {
+            continue;
+        }
+        const auto value = object->get(field);
+        if (!value.isNumeric())
+        {
+            WriteError(response, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
+                       "invalid_request", std::string(field) + " must be a number.");
+            return false;
+        }
+        const double number = value.convert<double>();
+        const std::string fieldName(field);
+        const bool isScale = fieldName == "scale";
+        const double minimum = isScale ? 0.1 : -1.0;
+        const double maximum = isScale ? 10.0 : 1.0;
+        if (!std::isfinite(number) || number < minimum || number > maximum)
+        {
+            std::ostringstream message;
+            message << field << " must be between " << minimum
+                    << " and " << maximum << '.';
+            WriteError(response, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
+                       "invalid_request", message.str());
+            return false;
+        }
+        auto& target = isScale
+                           ? layout.scale
+                           : (fieldName == "offsetX"
+                                  ? layout.offsetX
+                                  : layout.offsetY);
+        target = static_cast<float>(number);
+    }
+    return true;
+}
+
+bool ParseVideoLayoutQuery(const Poco::URI& uri, VideoLayout& layout,
+                           Poco::Net::HTTPServerResponse& response)
+{
+    Poco::JSON::Object::Ptr object = new Poco::JSON::Object;
+    for (const auto& parameter : uri.getQueryParameters())
+    {
+        if (parameter.first == "fit")
+        {
+            object->set("fit", parameter.second);
+        }
+        else if (parameter.first == "scale" ||
+                 parameter.first == "offsetX" ||
+                 parameter.first == "offsetY")
+        {
+            double value = 0.0;
+            if (!Poco::NumberParser::tryParseFloat(parameter.second, value))
+            {
+                WriteError(response, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
+                           "invalid_request",
+                           parameter.first + " must be a number.");
+                return false;
+            }
+            object->set(parameter.first, value);
+        }
+        else
+        {
+            WriteError(response, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
+                       "invalid_request",
+                       "Unknown video layout query parameter: " + parameter.first);
+            return false;
+        }
+    }
+    return ParseVideoLayoutObject(object, layout, response);
+}
+
 // Resolves the ?deck=N query parameter (default 0) against the number of decks.
 // Writes a 400/404 error response and returns false on a bad or out-of-range value.
 bool ParseDeck(const Poco::URI& uri, std::size_t deckCount, std::uint32_t& deck,
@@ -870,15 +989,58 @@ void ApiRequestHandler::handleRequest(Poco::Net::HTTPServerRequest& request,
                 body.set("name", playback.name);
                 body.set("width", playback.width);
                 body.set("height", playback.height);
+                body.set("layout", VideoLayoutJson(playback.layout));
                 if (!playback.error.empty())
                 {
                     body.set("error", playback.error);
                 }
                 return WriteJson(response, Poco::Net::HTTPResponse::HTTP_OK, body);
             }
+            if (method == "PATCH")
+            {
+                const auto playback = _videos.GetPlayback();
+                if (playback.state == "disabled")
+                {
+                    return WriteError(response, Poco::Net::HTTPResponse::HTTP_CONFLICT,
+                                      "video_disabled",
+                                      "No video is active or loading.");
+                }
+                std::string body;
+                if (!ReadBody(request, response, controlBodyLimit, body))
+                {
+                    return;
+                }
+                const auto object = ParseObject(body);
+                if (object->size() == 0)
+                {
+                    return WriteError(response, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
+                                      "invalid_request",
+                                      "At least one video layout field is required.");
+                }
+                auto layout = playback.layout;
+                if (!ParseVideoLayoutObject(object, layout, response))
+                {
+                    return;
+                }
+                ControlCommand command;
+                command.type = ControlCommandType::UpdateVideoLayout;
+                command.videoLayout = layout;
+                if (!_commands.TryEnqueue(command))
+                {
+                    return WriteError(response, Poco::Net::HTTPResponse::HTTP_SERVICE_UNAVAILABLE,
+                                      "queue_full", "The remote-control command queue is full.");
+                }
+                _videos.UpdatePlaybackLayout(layout);
+                _videos.SetLayout(playback.name, layout);
+                Poco::JSON::Object result;
+                result.set("ok", true);
+                result.set("queued", true);
+                result.set("layout", VideoLayoutJson(layout));
+                return WriteJson(response, Poco::Net::HTTPResponse::HTTP_ACCEPTED, result);
+            }
             if (method != "DELETE")
             {
-                return MethodNotAllowed(response, "GET, DELETE");
+                return MethodNotAllowed(response, "GET, PATCH, DELETE");
             }
             ControlCommand command;
             command.type = ControlCommandType::DisableVideo;
@@ -904,6 +1066,7 @@ void ApiRequestHandler::handleRequest(Poco::Net::HTTPServerRequest& request,
                     Poco::JSON::Object item;
                     item.set("name", entry.name);
                     item.set("sizeBytes", static_cast<Poco::UInt64>(entry.sizeBytes));
+                    item.set("layout", VideoLayoutJson(entry.layout));
                     item.set("active", playback.state == "playing" &&
                                        playback.name == entry.name);
                     items.add(item);
@@ -966,17 +1129,24 @@ void ApiRequestHandler::handleRequest(Poco::Net::HTTPServerRequest& request,
                         return WriteError(response, Poco::Net::HTTPResponse::HTTP_NOT_FOUND,
                                           "not_found", "No video named " + name + ".");
                     }
+                    auto layout = entry.layout;
+                    if (!ParseVideoLayoutQuery(uri, layout, response))
+                    {
+                        return;
+                    }
                     ControlCommand command;
                     command.type = ControlCommandType::LoadVideo;
                     command.payload = entry.path;
                     command.resourceName = name;
+                    command.videoLayout = layout;
                     if (!_commands.TryEnqueue(command))
                     {
                         return WriteError(
                             response, Poco::Net::HTTPResponse::HTTP_SERVICE_UNAVAILABLE,
                             "queue_full", "The remote-control command queue is full.");
                     }
-                    _videos.SetLoading(name);
+                    _videos.SetLayout(name, layout);
+                    _videos.SetLoading(name, layout);
                     Poco::JSON::Object result;
                     result.set("ok", true);
                     result.set("queued", true);
@@ -1016,6 +1186,11 @@ void ApiRequestHandler::handleRequest(Poco::Net::HTTPServerRequest& request,
                     return MethodNotAllowed(response, "PUT, DELETE");
                 }
 
+                VideoLayout layout;
+                if (!ParseVideoLayoutQuery(uri, layout, response))
+                {
+                    return;
+                }
                 std::string body;
                 if (!ReadBody(request, response, videoBodyLimit, body))
                 {
@@ -1027,22 +1202,24 @@ void ApiRequestHandler::handleRequest(Poco::Net::HTTPServerRequest& request,
                                       "invalid_video", "Video upload must not be empty.");
                 }
 
-                const auto entry = _videos.Set(name, body);
+                const auto entry = _videos.Set(name, body, layout);
                 ControlCommand command;
                 command.type = ControlCommandType::LoadVideo;
                 command.payload = entry.path;
                 command.resourceName = name;
+                command.videoLayout = layout;
                 if (!_commands.TryEnqueue(command))
                 {
                     return WriteError(response, Poco::Net::HTTPResponse::HTTP_SERVICE_UNAVAILABLE,
                                       "queue_full", "The remote-control command queue is full.");
                 }
-                _videos.SetLoading(name);
+                _videos.SetLoading(name, layout);
                 Poco::JSON::Object result;
                 result.set("ok", true);
                 result.set("queued", true);
                 result.set("name", name);
                 result.set("sizeBytes", static_cast<Poco::UInt64>(entry.sizeBytes));
+                result.set("layout", VideoLayoutJson(layout));
                 return WriteJson(response, Poco::Net::HTTPResponse::HTTP_ACCEPTED, result);
             }
         }

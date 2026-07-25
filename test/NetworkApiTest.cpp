@@ -219,10 +219,28 @@ void RunTests()
             "Video load command should preserve the logical name.");
     Require(!videoCommand.payload.empty(),
             "Video load command should include its temporary path.");
+    Require(videoCommand.videoLayout.fit == VideoFit::Cover,
+            "Video uploads should default to aspect-preserving cover.");
 
     auto videoState = Request(server.Port(), "GET", "/api/v1/video");
     Require(videoState.body->getValue<std::string>("state") == "loading",
             "Uploaded video should report loading until the render thread handles it.");
+    Require(videoState.body->getObject("layout")->getValue<std::string>("fit") ==
+                "cover",
+            "Playback state should expose the initial video layout.");
+
+    auto updateVideoLayout = Request(
+        server.Port(), "PATCH", "/api/v1/video",
+        R"({"fit":"contain","scale":1.2,"offsetX":0.1,"offsetY":-0.1})");
+    Require(updateVideoLayout.status == Poco::Net::HTTPResponse::HTTP_ACCEPTED,
+            "Active video layout should be runtime-configurable.");
+    ControlCommand layoutCommand{};
+    Require(queue.TryDequeue(layoutCommand),
+            "A live video layout update should be queued.");
+    Require(layoutCommand.type == ControlCommandType::UpdateVideoLayout &&
+                layoutCommand.videoLayout.fit == VideoFit::Contain &&
+                layoutCommand.videoLayout.scale == 1.2F,
+            "The render command should preserve the requested video layout.");
 
     auto videosList = Request(server.Port(), "GET", "/api/v1/videos");
     auto videosArray = videosList.body->getArray("videos");
@@ -246,11 +264,39 @@ void RunTests()
     Require(queue.TryDequeue(reloadVideoCommand), "Stored video load should be queued.");
     Require(reloadVideoCommand.type == ControlCommandType::LoadVideo,
             "Stored video load should queue the correct command.");
+    Require(reloadVideoCommand.videoLayout.fit == VideoFit::Contain,
+            "Stored video reload should retain its last configured layout.");
     videos.SetDisabled();
 
     auto removeVideo = Request(server.Port(), "DELETE", "/api/v1/videos/clip.mp4");
     Require(removeVideo.status == Poco::Net::HTTPResponse::HTTP_OK,
             "Stored video should be removable.");
+
+    auto invalidVideoLayout = Request(
+        server.Port(), "PUT", "/api/v1/videos/bad.mp4?fit=distort",
+        "fake-video-bytes");
+    Require(invalidVideoLayout.status ==
+                Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
+            "Invalid upload-time video layout should be rejected.");
+
+    auto configuredVideo = Request(
+        server.Port(), "PUT",
+        "/api/v1/videos/framed.mp4?fit=stretch&scale=1.5&offsetX=0.2",
+        "fake-video-bytes");
+    Require(configuredVideo.status == Poco::Net::HTTPResponse::HTTP_ACCEPTED,
+            "Upload-time video layout should be accepted.");
+    ControlCommand configuredVideoCommand{};
+    Require(queue.TryDequeue(configuredVideoCommand),
+            "Configured video upload should queue a load.");
+    Require(configuredVideoCommand.videoLayout.fit == VideoFit::Stretch &&
+                configuredVideoCommand.videoLayout.scale == 1.5F &&
+                configuredVideoCommand.videoLayout.offsetX == 0.2F,
+            "The first video frame should use its upload-time layout.");
+    videos.SetDisabled();
+    auto removeConfiguredVideo = Request(
+        server.Port(), "DELETE", "/api/v1/videos/framed.mp4");
+    Require(removeConfiguredVideo.status == Poco::Net::HTTPResponse::HTTP_OK,
+            "Configured stored video should be removable.");
 
     auto noCurrentPreset = Request(server.Port(), "GET",
                                    "/api/v1/playback/current");

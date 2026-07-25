@@ -1,5 +1,7 @@
 #pragma once
 
+#include "network/VideoLayout.h"
+
 #include <cstddef>
 #include <mutex>
 #include <string>
@@ -20,6 +22,7 @@ public:
         std::string name;
         std::string path;
         std::size_t sizeBytes{0};
+        VideoLayout layout;
     };
 
     struct Playback
@@ -29,6 +32,7 @@ public:
         std::string error;
         int width{0};
         int height{0};
+        VideoLayout layout;
     };
 
     VideoStore();
@@ -37,14 +41,18 @@ public:
     VideoStore(const VideoStore&) = delete;
     VideoStore& operator=(const VideoStore&) = delete;
 
-    Entry Set(const std::string& name, const std::string& bytes);
+    Entry Set(const std::string& name, const std::string& bytes,
+              VideoLayout layout = {});
+    bool SetLayout(const std::string& name, VideoLayout layout);
     bool Remove(const std::string& name);
     std::size_t Clear();
     bool Find(const std::string& name, Entry& entry) const;
     std::vector<Entry> List() const;
 
-    void SetLoading(const std::string& name);
-    void SetPlaying(const std::string& name, int width, int height);
+    void SetLoading(const std::string& name, VideoLayout layout = {});
+    void SetPlaying(const std::string& name, int width, int height,
+                    VideoLayout layout = {});
+    void UpdatePlaybackLayout(VideoLayout layout);
     void SetError(const std::string& name, const std::string& error);
     void SetDisabled();
     Playback GetPlayback() const;
