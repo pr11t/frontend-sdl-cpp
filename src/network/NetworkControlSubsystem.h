@@ -3,6 +3,7 @@
 #include "network/ControlCommandQueue.h"
 #include "network/HttpApiServer.h"
 #include "network/JobRegistry.h"
+#include "network/PerformanceMetrics.h"
 #include "network/PlaybackState.h"
 #include "network/PresetRepository.h"
 #include "network/ShaderChainStore.h"
@@ -29,6 +30,7 @@ public:
     TextureStore& Textures();
     VideoStore& Videos();
     ShaderChainStore& Shaders();
+    PerformanceMetricsStore& Performance();
 
 protected:
     void initialize(Poco::Util::Application& app) override;
@@ -42,6 +44,7 @@ private:
     TextureStore _textures;
     VideoStore _videos;
     ShaderChainStore _shaders;
+    PerformanceMetricsStore _performance;
     std::unique_ptr<PresetRepository> _presets;
     std::unique_ptr<HttpApiServer> _server;
     Poco::Logger& _logger{Poco::Logger::get("NetworkControl")};

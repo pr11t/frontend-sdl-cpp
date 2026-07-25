@@ -233,6 +233,11 @@ void SettingsWindow::DrawWindowSettingsTab()
             IntegerSetting("projectM.fps", 60, 0, 300);
 
             ImGui::TableNextRow();
+            LabelWithTooltip("Display FPS",
+                             "Display measured FPS and frame time in the top-right corner.");
+            BooleanSetting("projectM.displayFps", false);
+
+            ImGui::TableNextRow();
             LabelWithTooltip("Wait for Vertical Sync",
                              "Wait for vertical sync interval before displaying the next frame.\nThis will limit max FPS to the vertical sync frequency but prevents tearing.");
             BooleanSetting("window.waitForVerticalSync", false);

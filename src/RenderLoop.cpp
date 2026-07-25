@@ -167,7 +167,15 @@ void RenderLoop::Run()
         limiter.EndFrame();
 
         // Pass projectM the actual FPS value of the last frame.
-        _projectMWrapper.UpdateRealFPS(limiter.FPS());
+        const auto measuredFps = limiter.FPS();
+        _networkControl.Performance().Record(
+            limiter.FrameTimeMilliseconds(),
+            limiter.WorkTimeMilliseconds(),
+            _projectMWrapper.TargetFPS(),
+            measuredFps);
+        _projectMGui.SetPerformanceMetrics(
+            measuredFps, limiter.FrameTimeMilliseconds());
+        _projectMWrapper.UpdateRealFPS(measuredFps);
     }
 
     notificationCenter.removeObserver(_quitNotificationObserver);

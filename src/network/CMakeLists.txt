@@ -9,6 +9,8 @@ add_library(ProjectMSDL-Network STATIC
         HttpApiServer.h
         JobRegistry.cpp
         JobRegistry.h
+        PerformanceMetrics.cpp
+        PerformanceMetrics.h
         PlaybackState.cpp
         PlaybackState.h
         PresetRepository.cpp

@@ -220,6 +220,11 @@ void ProjectMSDLApplication::defineOptions(Poco::Util::OptionSet& options)
                              false, "<number>", true)
                           .binding("projectM.fps", _commandLineOverrides));
 
+    options.addOption(Option("displayFps", "",
+                             "Display measured FPS and frame time over the visualization.",
+                             false, "<0/1>", true)
+                          .binding("projectM.displayFps", _commandLineOverrides));
+
     options.addOption(Option("shuffleEnabled", "", "Shuffle enabled.",
                              false, "<0/1>", true)
                           .binding("projectM.shuffleEnabled", _commandLineOverrides));

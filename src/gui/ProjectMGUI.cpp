@@ -121,10 +121,19 @@ bool ProjectMGUI::Visible() const
     return _visible;
 }
 
+void ProjectMGUI::SetPerformanceMetrics(float fps, double frameTimeMilliseconds)
+{
+    _measuredFps = fps;
+    _frameTimeMilliseconds = frameTimeMilliseconds;
+}
+
 void ProjectMGUI::Draw()
 {
+    const bool displayFps = Poco::Util::Application::instance().config().getBool(
+        "projectM.displayFps", false);
+
     // Don't render UI at all if there's no need.
-    if (!_toast && !_visible)
+    if (!_toast && !_visible && !displayFps)
     {
         return;
     }
@@ -164,6 +173,28 @@ void ProjectMGUI::Draw()
         _settingsWindow.Draw();
         _aboutWindow.Draw();
         _helpWindow.Draw();
+    }
+
+    if (displayFps)
+    {
+        constexpr auto flags =
+            ImGuiWindowFlags_NoDecoration |
+            ImGuiWindowFlags_AlwaysAutoResize |
+            ImGuiWindowFlags_NoSavedSettings |
+            ImGuiWindowFlags_NoFocusOnAppearing |
+            ImGuiWindowFlags_NoNav |
+            ImGuiWindowFlags_NoInputs;
+        const auto& io = ImGui::GetIO();
+        ImGui::SetNextWindowPos(
+            ImVec2(io.DisplaySize.x - 10.0F, 10.0F),
+            ImGuiCond_Always, ImVec2(1.0F, 0.0F));
+        ImGui::SetNextWindowBgAlpha(0.65F);
+        if (ImGui::Begin("##PerformanceOverlay", nullptr, flags))
+        {
+            ImGui::Text("%.1f FPS  |  %.2f ms", _measuredFps,
+                        _frameTimeMilliseconds);
+        }
+        ImGui::End();
     }
 
     ImGui::Render();

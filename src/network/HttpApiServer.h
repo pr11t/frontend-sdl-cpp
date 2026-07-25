@@ -3,6 +3,7 @@
 #include "network/ConfigLayers.h"
 #include "network/ControlCommandQueue.h"
 #include "network/JobRegistry.h"
+#include "network/PerformanceMetrics.h"
 #include "network/PlaybackState.h"
 #include "network/PresetRepository.h"
 #include "network/ShaderChainStore.h"
@@ -23,6 +24,7 @@ public:
                   PresetRepository& presets, VisualStateStore& visuals,
                   PlaybackStateStore& playback, TextureStore& textures,
                   VideoStore& videos, ShaderChainStore& shaders,
+                  PerformanceMetricsStore& performance,
                   ConfigLayers configLayers);
     ~HttpApiServer();
 
@@ -41,6 +43,7 @@ private:
     TextureStore& _textures;
     VideoStore& _videos;
     ShaderChainStore& _shaders;
+    PerformanceMetricsStore& _performance;
     ConfigLayers _configLayers;
     std::unique_ptr<Poco::Net::HTTPServer> _server;
     std::uint16_t _port{0};

@@ -398,8 +398,10 @@ const std::vector<ConfigOption>& ConfigOptions()
          "Per-pixel mesh width."},
         {"meshY", "projectM.meshY", ConfigType::Int, 1.0, 512.0, 54.0,
          "Per-pixel mesh height."},
-        {"fps", "projectM.fps", ConfigType::Int, 1.0, 1000.0, 60.0,
-         "Target FPS used for projectM timing. The window frame limiter may need a restart."},
+        {"fps", "projectM.fps", ConfigType::Int, 0.0, 1000.0, 60.0,
+         "Target FPS used for projectM timing. 0 disables the frame limiter."},
+        {"displayFps", "projectM.displayFps", ConfigType::Bool, 0.0, 0.0, 0.0,
+         "Display measured FPS and frame time over the visualization."},
         {"fullscreen", "window.fullscreen", ConfigType::Bool, 0.0, 0.0, 0.0,
          "Switch the window between fullscreen and windowed mode."},
     };
@@ -472,6 +474,7 @@ ApiRequestHandler::ApiRequestHandler(ControlCommandQueue& commands, JobRegistry&
                                      PresetRepository& presets, VisualStateStore& visuals,
                                      PlaybackStateStore& playback, TextureStore& textures,
                                      VideoStore& videos, ShaderChainStore& shaders,
+                                     PerformanceMetricsStore& performance,
                                      ConfigLayers configLayers)
     : _commands(commands)
     , _jobs(jobs)
@@ -481,6 +484,7 @@ ApiRequestHandler::ApiRequestHandler(ControlCommandQueue& commands, JobRegistry&
     , _textures(textures)
     , _videos(videos)
     , _shaders(shaders)
+    , _performance(performance)
     , _configLayers(std::move(configLayers))
 {
 }
@@ -504,6 +508,51 @@ void ApiRequestHandler::handleRequest(Poco::Net::HTTPServerRequest& request,
             body.set("ok", true);
             body.set("service", "projectMSDL");
             body.set("apiVersion", 1);
+            return WriteJson(response, Poco::Net::HTTPResponse::HTTP_OK, body);
+        }
+
+        if (path == "/api/v1/performance")
+        {
+            if (method == "DELETE")
+            {
+                _performance.Reset();
+                Poco::JSON::Object body;
+                body.set("ok", true);
+                return WriteJson(response, Poco::Net::HTTPResponse::HTTP_OK, body);
+            }
+            if (method != "GET")
+            {
+                return MethodNotAllowed(response, "GET, DELETE");
+            }
+
+            const auto metrics = _performance.GetSnapshot();
+            Poco::JSON::Object frameTime;
+            frameTime.set("last", metrics.lastFrameMilliseconds);
+            frameTime.set("p50", metrics.p50FrameMilliseconds);
+            frameTime.set("p95", metrics.p95FrameMilliseconds);
+            frameTime.set("p99", metrics.p99FrameMilliseconds);
+            frameTime.set("max", metrics.maxFrameMilliseconds);
+
+            Poco::JSON::Object workTime;
+            workTime.set("last", metrics.lastWorkMilliseconds);
+            workTime.set("p50", metrics.p50WorkMilliseconds);
+            workTime.set("p95", metrics.p95WorkMilliseconds);
+            workTime.set("p99", metrics.p99WorkMilliseconds);
+            workTime.set("max", metrics.maxWorkMilliseconds);
+
+            Poco::JSON::Object missedDeadlines;
+            missedDeadlines.set("count", metrics.missedDeadlines);
+            missedDeadlines.set("percent", metrics.missedDeadlinePercent);
+
+            Poco::JSON::Object body;
+            body.set("ok", true);
+            body.set("targetFps", metrics.targetFps);
+            body.set("fps", metrics.measuredFps);
+            body.set("sampleCount", metrics.sampleCount);
+            body.set("totalFrames", metrics.totalFrames);
+            body.set("frameTimeMs", frameTime);
+            body.set("workTimeMs", workTime);
+            body.set("missedDeadlines", missedDeadlines);
             return WriteJson(response, Poco::Net::HTTPResponse::HTTP_OK, body);
         }
 
@@ -1867,6 +1916,7 @@ ApiRequestHandlerFactory::ApiRequestHandlerFactory(ControlCommandQueue& commands
                                                    TextureStore& textures,
                                                    VideoStore& videos,
                                                    ShaderChainStore& shaders,
+                                                   PerformanceMetricsStore& performance,
                                                    ConfigLayers configLayers)
     : _commands(commands)
     , _jobs(jobs)
@@ -1876,6 +1926,7 @@ ApiRequestHandlerFactory::ApiRequestHandlerFactory(ControlCommandQueue& commands
     , _textures(textures)
     , _videos(videos)
     , _shaders(shaders)
+    , _performance(performance)
     , _configLayers(std::move(configLayers))
 {
 }
@@ -1885,5 +1936,5 @@ Poco::Net::HTTPRequestHandler* ApiRequestHandlerFactory::createRequestHandler(
 {
     return new ApiRequestHandler(_commands, _jobs, _presets, _visuals,
                                  _playback, _textures, _videos, _shaders,
-                                 _configLayers);
+                                 _performance, _configLayers);
 }

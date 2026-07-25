@@ -63,6 +63,11 @@ public:
     void Draw();
 
     /**
+     * @brief Supplies the latest measured frame performance for the overlay.
+     */
+    void SetPerformanceMetrics(float fps, double frameTimeMilliseconds);
+
+    /**
      * @brief Tells the caller whether the UI currently wants the keyboard input.
      * @return True if the UI wants the keyboard input, false if the app should process the events.
      */
@@ -135,6 +140,8 @@ private:
     std::unique_ptr<ToastMessage> _toast; //!< Current toast to be displayed.
 
     bool _visible{false}; //!< Flag for settings window visibility.
+    float _measuredFps{0.0F}; //!< Latest measured render-loop frame rate.
+    double _frameTimeMilliseconds{0.0}; //!< Latest full frame duration.
 
     Poco::Logger& _logger{Poco::Logger::get("ProjectMGUI")}; //!< The class logger.
 };

@@ -23,6 +23,12 @@ public:
      */
     float FPS() const;
 
+    /// Total duration of the latest frame, including any FPS-limiting delay.
+    double FrameTimeMilliseconds() const;
+
+    /// CPU/render work duration before any FPS-limiting delay.
+    double WorkTimeMilliseconds() const;
+
     /**
      * @brief Marks the start of a new frame.
      *
@@ -40,10 +46,11 @@ public:
 protected:
 
     uint32_t _lastTickCount{ 0 }; //!< Last SDL tick count, when a new frame was started.
+    uint64_t _lastPerformanceCounter{0}; //!< High-resolution counter captured at frame start.
     uint32_t _targetFrameTime{ 0 }; //!< Targeted time per frame in milliseconds.
-    uint32_t _lastFrameTimes[10]{}; //!< Actual tick time of the last ten frames, including limiting delay.
+    double _lastFrameTimes[10]{}; //!< Last ten frame durations, including limiting delay.
+    double _lastWorkTimeMilliseconds{0.0}; //!< Latest frame duration before limiting delay.
     int _nextFrameTimesOffset{ 0 }; //!< Next offset to overwrite the _lastFrameTimes ring buffer.
 
 };
-
 

@@ -100,6 +100,9 @@ projectM.presetLocked = false
 # Target FPS, usually 60.
 projectM.fps = 60
 
+# Display measured FPS and frame time over the visualization.
+projectM.displayFps = false
+
 # Per-pixel mesh size. This is the grid in which "per-pixel" code is executed, once per cell.
 # Do not set this value too high, as it severely impacts performance. On low-end hardware, set this to a small
 # value, e.g. 48x32. This does *NOT* affect the actual render/shader resolution!

@@ -88,6 +88,55 @@ curl -s http://127.0.0.1:8080/api/v1/health
 }
 ```
 
+## Performance metrics
+
+The render loop keeps a rolling window of the latest 600 frames. Read it to
+measure smoothness without judging the output visually:
+
+```http
+GET /api/v1/performance
+```
+
+```json
+{
+  "ok": true,
+  "targetFps": 60,
+  "fps": 59.8,
+  "sampleCount": 600,
+  "totalFrames": 12420,
+  "frameTimeMs": {
+    "last": 16.67,
+    "p50": 16.65,
+    "p95": 17.1,
+    "p99": 21.2,
+    "max": 29.8
+  },
+  "workTimeMs": {
+    "last": 9.3,
+    "p50": 8.9,
+    "p95": 11.4,
+    "p99": 18.1,
+    "max": 27.5
+  },
+  "missedDeadlines": {
+    "count": 8,
+    "percent": 1.33
+  }
+}
+```
+
+`frameTimeMs` includes time spent in the FPS limiter. `workTimeMs` measures
+render-loop work before that delay and is therefore the useful value for
+finding rendering or video-decoding stalls. A deadline is missed when work time
+exceeds the target frame budget. When target FPS is unlimited, missed deadlines
+remain zero.
+
+Clear the window and total-frame counter before a benchmark run:
+
+```http
+DELETE /api/v1/performance
+```
+
 ## Decks
 
 A *deck* is an independent projectM instance with its own preset and playlist.
@@ -727,8 +776,17 @@ layers. Updates are queued and applied on the render thread.
 | `aspectCorrectionEnabled` | Boolean | Correct preset aspect ratio to the window. |
 | `meshX` | Integer `1`–`512` | Per-pixel mesh width. |
 | `meshY` | Integer `1`–`512` | Per-pixel mesh height. |
-| `fps` | Integer `1`–`1000` | Target FPS used for projectM timing. The window frame limiter may still require a restart. |
+| `fps` | Integer `0`–`1000` | Target FPS used for projectM timing. `0` disables the frame limiter. |
+| `displayFps` | Boolean | Display measured FPS and frame time in the top-right corner. |
 | `fullscreen` | Boolean | Switch the window between fullscreen and windowed mode. |
+
+For example, enable the overlay while the visualizer is running:
+
+```sh
+curl -X PATCH http://127.0.0.1:8080/api/v1/config \
+  -H 'Content-Type: application/json' \
+  -d '{"displayFps":true}'
+```
 
 ### Read the schema
 

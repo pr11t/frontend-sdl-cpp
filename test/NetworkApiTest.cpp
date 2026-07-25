@@ -2,6 +2,7 @@
 #include "network/ControlCommandQueue.h"
 #include "network/HttpApiServer.h"
 #include "network/JobRegistry.h"
+#include "network/PerformanceMetrics.h"
 #include "network/PlaybackState.h"
 #include "network/PresetRepository.h"
 #include "network/ShaderChainStore.h"
@@ -97,13 +98,14 @@ void RunTests()
     TextureStore textures;
     VideoStore videos;
     ShaderChainStore shaders;
+    PerformanceMetricsStore performance;
     ConfigLayers configLayers;
     configLayers.effective = new Poco::Util::MapConfiguration();
     configLayers.runtime = new Poco::Util::MapConfiguration();
     configLayers.commandLine = new Poco::Util::MapConfiguration();
     configLayers.user = new Poco::Util::MapConfiguration();
     HttpApiServer server(queue, jobs, presets, visuals, playback, textures,
-                         videos, shaders, configLayers);
+                         videos, shaders, performance, configLayers);
     server.Start("127.0.0.1", 0);
     Require(server.Running(), "Server should be running.");
     Require(server.Port() != 0, "Ephemeral server port should be assigned.");
@@ -112,6 +114,38 @@ void RunTests()
     Require(health.status == Poco::Net::HTTPResponse::HTTP_OK, "Health should return 200.");
     Require(health.body->getValue<bool>("ok"), "Health response should be successful.");
     Require(health.body->getValue<int>("apiVersion") == 1, "Health API version should be 1.");
+
+    performance.Record(16.7, 8.0, 60, 59.8);
+    performance.Record(24.0, 20.0, 60, 55.0);
+    auto metrics = Request(server.Port(), "GET", "/api/v1/performance");
+    Require(metrics.status == Poco::Net::HTTPResponse::HTTP_OK,
+            "Performance metrics should return 200.");
+    Require(metrics.body->getValue<int>("sampleCount") == 2,
+            "Performance metrics should report rolling sample count.");
+    Require(metrics.body->getValue<int>("totalFrames") == 2,
+            "Performance metrics should report total frames.");
+    Require(metrics.body->getObject("missedDeadlines")->getValue<int>("count") == 1,
+            "Performance metrics should count missed target-FPS deadlines.");
+    Require(metrics.body->getObject("frameTimeMs")->getValue<double>("max") == 24.0,
+            "Performance metrics should report maximum frame time.");
+
+    auto resetMetrics = Request(server.Port(), "DELETE", "/api/v1/performance");
+    Require(resetMetrics.status == Poco::Net::HTTPResponse::HTTP_OK,
+            "Performance metrics reset should return 200.");
+    auto emptyMetrics = Request(server.Port(), "GET", "/api/v1/performance");
+    Require(emptyMetrics.body->getValue<int>("sampleCount") == 0,
+            "Performance metrics reset should clear the rolling window.");
+
+    auto enableFpsOverlay = Request(server.Port(), "PATCH", "/api/v1/config",
+                                    R"({"displayFps":true})");
+    Require(enableFpsOverlay.status == Poco::Net::HTTPResponse::HTTP_ACCEPTED,
+            "FPS overlay should be runtime-configurable.");
+    ControlCommand overlayCommand{};
+    Require(queue.TryDequeue(overlayCommand), "FPS overlay update should be queued.");
+    Require(overlayCommand.type == ControlCommandType::SetConfig &&
+                overlayCommand.configKey == "projectM.displayFps" &&
+                overlayCommand.configValue == "true",
+            "FPS overlay update should target the displayFps configuration.");
 
     auto uploadVideo = Request(server.Port(), "PUT", "/api/v1/videos/clip.mp4",
                                "fake-video-bytes");

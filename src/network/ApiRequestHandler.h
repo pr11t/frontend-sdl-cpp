@@ -3,6 +3,7 @@
 #include "network/ConfigLayers.h"
 #include "network/ControlCommandQueue.h"
 #include "network/JobRegistry.h"
+#include "network/PerformanceMetrics.h"
 #include "network/PlaybackState.h"
 #include "network/PresetRepository.h"
 #include "network/ShaderChainStore.h"
@@ -20,6 +21,7 @@ public:
                       PresetRepository& presets, VisualStateStore& visuals,
                       PlaybackStateStore& playback, TextureStore& textures,
                       VideoStore& videos, ShaderChainStore& shaders,
+                      PerformanceMetricsStore& performance,
                       ConfigLayers configLayers);
 
     void handleRequest(Poco::Net::HTTPServerRequest& request,
@@ -34,6 +36,7 @@ private:
     TextureStore& _textures;
     VideoStore& _videos;
     ShaderChainStore& _shaders;
+    PerformanceMetricsStore& _performance;
     ConfigLayers _configLayers;
 };
 
@@ -44,6 +47,7 @@ public:
                              PresetRepository& presets, VisualStateStore& visuals,
                              PlaybackStateStore& playback, TextureStore& textures,
                              VideoStore& videos, ShaderChainStore& shaders,
+                             PerformanceMetricsStore& performance,
                              ConfigLayers configLayers);
 
     Poco::Net::HTTPRequestHandler* createRequestHandler(
@@ -58,5 +62,6 @@ private:
     TextureStore& _textures;
     VideoStore& _videos;
     ShaderChainStore& _shaders;
+    PerformanceMetricsStore& _performance;
     ConfigLayers _configLayers;
 };
