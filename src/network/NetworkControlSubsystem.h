@@ -7,6 +7,7 @@
 #include "network/PresetRepository.h"
 #include "network/ShaderChainStore.h"
 #include "network/TextureStore.h"
+#include "network/VideoStore.h"
 #include "network/VisualState.h"
 
 #include <Poco/Logger.h>
@@ -26,6 +27,7 @@ public:
     VisualStateStore& Visuals();
     PlaybackStateStore& Playback();
     TextureStore& Textures();
+    VideoStore& Videos();
     ShaderChainStore& Shaders();
 
 protected:
@@ -38,6 +40,7 @@ private:
     VisualStateStore _visuals;
     PlaybackStateStore _playback;
     TextureStore _textures;
+    VideoStore _videos;
     ShaderChainStore _shaders;
     std::unique_ptr<PresetRepository> _presets;
     std::unique_ptr<HttpApiServer> _server;

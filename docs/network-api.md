@@ -429,6 +429,80 @@ job includes the parser or loading error when libprojectM provides one:
 
 The server retains a bounded set of recent jobs.
 
+## Runtime video storage and playback
+
+Videos can be uploaded after startup and played immediately without restarting
+projectM. Uploads are process-local: the API writes them to a private temporary
+directory so FFmpeg can seek and loop normally, and removes the directory when
+the application exits. Each upload is limited to 256 MiB.
+
+### Upload and play
+
+```http
+PUT /api/v1/videos/{name}
+Content-Type: video/mp4
+```
+
+The name must be 1–128 characters of `[A-Za-z0-9_.-]`. The request body is the
+complete video file. Any format supported by the linked FFmpeg build can be
+used; the extension should match the container.
+
+```sh
+curl -s -X PUT \
+  -H 'Content-Type: video/mp4' \
+  --data-binary @background.mp4 \
+  http://127.0.0.1:8080/api/v1/videos/background.mp4
+```
+
+Uploading automatically queues the video on the render thread. A successful
+replacement starts from the beginning and loops until another video is
+uploaded or playback is disabled. The current decoder remains active if FFmpeg
+cannot open the replacement.
+
+With post-processing enabled, the video is exposed as the named `video` texture
+and a built-in compositor pass is inserted before existing user passes. Deck 0
+continues to provide the projectM visualization. Without post-processing, the
+video is drawn directly and replaces the projectM image while active.
+
+### Playback state
+
+```http
+GET /api/v1/video
+```
+
+The `state` is `disabled`, `loading`, `playing`, or `error`. Playing responses
+also include the decoded dimensions:
+
+```json
+{
+  "ok": true,
+  "state": "playing",
+  "name": "background.mp4",
+  "width": 1920,
+  "height": 1080
+}
+```
+
+Disable playback without removing stored uploads:
+
+```http
+DELETE /api/v1/video
+```
+
+### List and remove uploads
+
+```http
+GET    /api/v1/videos
+POST   /api/v1/videos/{name}/load
+DELETE /api/v1/videos/{name}
+DELETE /api/v1/videos
+```
+
+The `load` operation plays an already stored upload again without resending its
+bytes. Deleting the active video also disables video playback. Deleting the
+collection clears every upload and disables playback. Uploaded videos do not
+survive an application restart.
+
 ## In-memory textures
 
 Presets can display images (e.g. the current album cover, a logo, a backdrop)

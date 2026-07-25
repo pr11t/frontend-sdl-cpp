@@ -52,6 +52,12 @@ protected:
      */
     void DrainNetworkCommands();
 
+    /// Adds/replaces the built-in video compositing pass while preserving user passes.
+    void EnsureVideoCompositePass();
+
+    /// Removes the built-in video compositing pass while preserving user passes.
+    void RemoveVideoCompositePass();
+
     /**
      * @brief Handles SDL key press events.
      * @param event The key event.

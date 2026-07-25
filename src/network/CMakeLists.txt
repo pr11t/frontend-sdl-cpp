@@ -18,6 +18,8 @@ add_library(ProjectMSDL-Network STATIC
         StbImageImpl.cpp
         TextureStore.cpp
         TextureStore.h
+        VideoStore.cpp
+        VideoStore.h
         VisualState.cpp
         VisualState.h
         )

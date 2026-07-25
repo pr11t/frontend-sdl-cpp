@@ -19,7 +19,9 @@ enum class ControlCommandType
     SetConfig,
     ClearConfig,
     ReloadTextures,
-    ShowToast
+    ShowToast,
+    LoadVideo,
+    DisableVideo
 };
 
 struct ControlCommand
@@ -28,6 +30,7 @@ struct ControlCommand
     bool smoothTransition{false};
     std::uint64_t jobId{0};
     std::string payload;     //!< Also carries the toast text for ShowToast.
+    std::string resourceName; //!< Logical uploaded resource name, e.g. a video name.
     VisualStatePatch visualPatch;
     std::string configKey;   //!< Full config key for SetConfig, e.g. "projectM.displayDuration".
     std::string configValue; //!< Canonical string value for SetConfig, applied on the render thread.

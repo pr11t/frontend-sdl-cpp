@@ -10,13 +10,15 @@
 HttpApiServer::HttpApiServer(ControlCommandQueue& commands, JobRegistry& jobs,
                              PresetRepository& presets, VisualStateStore& visuals,
                              PlaybackStateStore& playback, TextureStore& textures,
-                             ShaderChainStore& shaders, ConfigLayers configLayers)
+                             VideoStore& videos, ShaderChainStore& shaders,
+                             ConfigLayers configLayers)
     : _commands(commands)
     , _jobs(jobs)
     , _presets(presets)
     , _visuals(visuals)
     , _playback(playback)
     , _textures(textures)
+    , _videos(videos)
     , _shaders(shaders)
     , _configLayers(std::move(configLayers))
 {
@@ -47,7 +49,8 @@ void HttpApiServer::Start(const std::string& bindAddress, std::uint16_t port)
 
     _server = std::make_unique<Poco::Net::HTTPServer>(
         new ApiRequestHandlerFactory(_commands, _jobs, _presets, _visuals,
-                                     _playback, _textures, _shaders, _configLayers),
+                                     _playback, _textures, _videos, _shaders,
+                                     _configLayers),
         socket, parameters);
     _server->start();
 }

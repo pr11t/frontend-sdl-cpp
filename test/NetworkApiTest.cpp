@@ -4,7 +4,9 @@
 #include "network/JobRegistry.h"
 #include "network/PlaybackState.h"
 #include "network/PresetRepository.h"
+#include "network/ShaderChainStore.h"
 #include "network/TextureStore.h"
+#include "network/VideoStore.h"
 #include "network/VisualState.h"
 
 #include <Poco/File.h>
@@ -93,12 +95,15 @@ void RunTests()
     PlaybackStateStore playback;
     playback.SetPresetRepository(&presets);
     TextureStore textures;
+    VideoStore videos;
+    ShaderChainStore shaders;
     ConfigLayers configLayers;
     configLayers.effective = new Poco::Util::MapConfiguration();
     configLayers.runtime = new Poco::Util::MapConfiguration();
     configLayers.commandLine = new Poco::Util::MapConfiguration();
     configLayers.user = new Poco::Util::MapConfiguration();
-    HttpApiServer server(queue, jobs, presets, visuals, playback, textures, configLayers);
+    HttpApiServer server(queue, jobs, presets, visuals, playback, textures,
+                         videos, shaders, configLayers);
     server.Start("127.0.0.1", 0);
     Require(server.Running(), "Server should be running.");
     Require(server.Port() != 0, "Ephemeral server port should be assigned.");
@@ -107,6 +112,53 @@ void RunTests()
     Require(health.status == Poco::Net::HTTPResponse::HTTP_OK, "Health should return 200.");
     Require(health.body->getValue<bool>("ok"), "Health response should be successful.");
     Require(health.body->getValue<int>("apiVersion") == 1, "Health API version should be 1.");
+
+    auto uploadVideo = Request(server.Port(), "PUT", "/api/v1/videos/clip.mp4",
+                               "fake-video-bytes");
+    Require(uploadVideo.status == Poco::Net::HTTPResponse::HTTP_ACCEPTED,
+            "Video upload should return 202.");
+    Require(uploadVideo.body->getValue<std::string>("name") == "clip.mp4",
+            "Video upload should report its logical name.");
+    ControlCommand videoCommand{};
+    Require(queue.TryDequeue(videoCommand), "Video upload should queue a load.");
+    Require(videoCommand.type == ControlCommandType::LoadVideo,
+            "Video upload should queue the video load command.");
+    Require(videoCommand.resourceName == "clip.mp4",
+            "Video load command should preserve the logical name.");
+    Require(!videoCommand.payload.empty(),
+            "Video load command should include its temporary path.");
+
+    auto videoState = Request(server.Port(), "GET", "/api/v1/video");
+    Require(videoState.body->getValue<std::string>("state") == "loading",
+            "Uploaded video should report loading until the render thread handles it.");
+
+    auto videosList = Request(server.Port(), "GET", "/api/v1/videos");
+    auto videosArray = videosList.body->getArray("videos");
+    Require(videosArray && videosArray->size() == 1,
+            "Uploaded video should be present in storage.");
+
+    auto disableVideo = Request(server.Port(), "DELETE", "/api/v1/video");
+    Require(disableVideo.status == Poco::Net::HTTPResponse::HTTP_ACCEPTED,
+            "Disabling video should return 202.");
+    ControlCommand disableVideoCommand{};
+    Require(queue.TryDequeue(disableVideoCommand), "Disable should be queued.");
+    Require(disableVideoCommand.type == ControlCommandType::DisableVideo,
+            "Disable endpoint should queue the correct command.");
+    videos.SetDisabled();
+
+    auto reloadVideo = Request(server.Port(), "POST",
+                               "/api/v1/videos/clip.mp4/load");
+    Require(reloadVideo.status == Poco::Net::HTTPResponse::HTTP_ACCEPTED,
+            "A stored video should be loadable without another upload.");
+    ControlCommand reloadVideoCommand{};
+    Require(queue.TryDequeue(reloadVideoCommand), "Stored video load should be queued.");
+    Require(reloadVideoCommand.type == ControlCommandType::LoadVideo,
+            "Stored video load should queue the correct command.");
+    videos.SetDisabled();
+
+    auto removeVideo = Request(server.Port(), "DELETE", "/api/v1/videos/clip.mp4");
+    Require(removeVideo.status == Poco::Net::HTTPResponse::HTTP_OK,
+            "Stored video should be removable.");
 
     auto noCurrentPreset = Request(server.Port(), "GET",
                                    "/api/v1/playback/current");
@@ -119,7 +171,7 @@ void RunTests()
     Require(!noCurrentPreset.body->getValue<bool>("fileBacked"),
             "An empty current preset should not be file-backed.");
 
-    playback.SetCurrentPresetFile("/presets/Artist - Example.milk");
+    playback.SetCurrentPresetFile(0, "/presets/Artist - Example.milk");
     auto currentPreset = Request(server.Port(), "GET",
                                  "/api/v1/playback/current");
     Require(currentPreset.body->getValue<std::string>("name") ==
@@ -130,7 +182,7 @@ void RunTests()
     Require(currentPreset.body->getValue<bool>("fileBacked"),
             "A preset file should be reported as file-backed.");
 
-    playback.SetCurrentPresetFile(bundledPreset);
+    playback.SetCurrentPresetFile(0, bundledPreset);
     auto bundledCurrent = Request(server.Port(), "GET",
                                   "/api/v1/playback/current");
     Require(bundledCurrent.body->getValue<std::string>("name") == "read-only.milk",

@@ -7,6 +7,7 @@
 #include "network/PresetRepository.h"
 #include "network/ShaderChainStore.h"
 #include "network/TextureStore.h"
+#include "network/VideoStore.h"
 #include "network/VisualState.h"
 
 #include <Poco/Net/HTTPRequestHandler.h>
@@ -18,7 +19,8 @@ public:
     ApiRequestHandler(ControlCommandQueue& commands, JobRegistry& jobs,
                       PresetRepository& presets, VisualStateStore& visuals,
                       PlaybackStateStore& playback, TextureStore& textures,
-                      ShaderChainStore& shaders, ConfigLayers configLayers);
+                      VideoStore& videos, ShaderChainStore& shaders,
+                      ConfigLayers configLayers);
 
     void handleRequest(Poco::Net::HTTPServerRequest& request,
                        Poco::Net::HTTPServerResponse& response) override;
@@ -30,6 +32,7 @@ private:
     VisualStateStore& _visuals;
     PlaybackStateStore& _playback;
     TextureStore& _textures;
+    VideoStore& _videos;
     ShaderChainStore& _shaders;
     ConfigLayers _configLayers;
 };
@@ -40,7 +43,8 @@ public:
     ApiRequestHandlerFactory(ControlCommandQueue& commands, JobRegistry& jobs,
                              PresetRepository& presets, VisualStateStore& visuals,
                              PlaybackStateStore& playback, TextureStore& textures,
-                             ShaderChainStore& shaders, ConfigLayers configLayers);
+                             VideoStore& videos, ShaderChainStore& shaders,
+                             ConfigLayers configLayers);
 
     Poco::Net::HTTPRequestHandler* createRequestHandler(
         const Poco::Net::HTTPServerRequest& request) override;
@@ -52,6 +56,7 @@ private:
     VisualStateStore& _visuals;
     PlaybackStateStore& _playback;
     TextureStore& _textures;
+    VideoStore& _videos;
     ShaderChainStore& _shaders;
     ConfigLayers _configLayers;
 };

@@ -23,6 +23,7 @@ namespace {
 
 constexpr std::size_t controlBodyLimit = 4096;
 constexpr std::size_t textureBodyLimit = 16 * 1024 * 1024; //!< 16 MiB cap for texture uploads.
+constexpr std::size_t videoBodyLimit = 256 * 1024 * 1024; //!< 256 MiB cap for video uploads.
 constexpr std::size_t shaderBodyLimit = 256 * 1024; //!< 256 KiB cap for shader source uploads.
 
 // Decodes JPEG/PNG/BMP bytes into a bottom-row-first RGBA image for projectM's
@@ -53,9 +54,8 @@ DecodedImagePtr DecodeImage(const std::string& body)
     return image;
 }
 
-// A texture name must be a non-empty run of [A-Za-z0-9_.-] so it is safe to use
-// in a URL path and as a preset texture reference.
-bool ValidTextureName(const std::string& name)
+// Uploaded resource names use a URL-safe subset and cannot escape storage paths.
+bool ValidResourceName(const std::string& name)
 {
     if (name.empty() || name.size() > 128)
     {
@@ -471,13 +471,15 @@ Poco::Dynamic::Var ConfigEffectiveValue(const ConfigLayers& layers, const Config
 ApiRequestHandler::ApiRequestHandler(ControlCommandQueue& commands, JobRegistry& jobs,
                                      PresetRepository& presets, VisualStateStore& visuals,
                                      PlaybackStateStore& playback, TextureStore& textures,
-                                     ShaderChainStore& shaders, ConfigLayers configLayers)
+                                     VideoStore& videos, ShaderChainStore& shaders,
+                                     ConfigLayers configLayers)
     : _commands(commands)
     , _jobs(jobs)
     , _presets(presets)
     , _visuals(visuals)
     , _playback(playback)
     , _textures(textures)
+    , _videos(videos)
     , _shaders(shaders)
     , _configLayers(std::move(configLayers))
 {
@@ -704,6 +706,194 @@ void ApiRequestHandler::handleRequest(Poco::Net::HTTPServerRequest& request,
             }
         }
 
+        if (path == "/api/v1/video")
+        {
+            if (method == "GET")
+            {
+                const auto playback = _videos.GetPlayback();
+                Poco::JSON::Object body;
+                body.set("ok", true);
+                body.set("state", playback.state);
+                body.set("name", playback.name);
+                body.set("width", playback.width);
+                body.set("height", playback.height);
+                if (!playback.error.empty())
+                {
+                    body.set("error", playback.error);
+                }
+                return WriteJson(response, Poco::Net::HTTPResponse::HTTP_OK, body);
+            }
+            if (method != "DELETE")
+            {
+                return MethodNotAllowed(response, "GET, DELETE");
+            }
+            ControlCommand command;
+            command.type = ControlCommandType::DisableVideo;
+            if (!_commands.TryEnqueue(command))
+            {
+                return WriteError(response, Poco::Net::HTTPResponse::HTTP_SERVICE_UNAVAILABLE,
+                                  "queue_full", "The remote-control command queue is full.");
+            }
+            Poco::JSON::Object result;
+            result.set("ok", true);
+            result.set("queued", true);
+            return WriteJson(response, Poco::Net::HTTPResponse::HTTP_ACCEPTED, result);
+        }
+
+        if (path == "/api/v1/videos")
+        {
+            if (method == "GET")
+            {
+                const auto playback = _videos.GetPlayback();
+                Poco::JSON::Array items;
+                for (const auto& entry : _videos.List())
+                {
+                    Poco::JSON::Object item;
+                    item.set("name", entry.name);
+                    item.set("sizeBytes", static_cast<Poco::UInt64>(entry.sizeBytes));
+                    item.set("active", playback.state == "playing" &&
+                                       playback.name == entry.name);
+                    items.add(item);
+                }
+                Poco::JSON::Object body;
+                body.set("ok", true);
+                body.set("videos", items);
+                return WriteJson(response, Poco::Net::HTTPResponse::HTTP_OK, body);
+            }
+            if (method != "DELETE")
+            {
+                return MethodNotAllowed(response, "GET, DELETE");
+            }
+            ControlCommand command;
+            command.type = ControlCommandType::DisableVideo;
+            if (!_commands.TryEnqueue(command))
+            {
+                return WriteError(response, Poco::Net::HTTPResponse::HTTP_SERVICE_UNAVAILABLE,
+                                  "queue_full", "The remote-control command queue is full.");
+            }
+            const auto cleared = _videos.Clear();
+            Poco::JSON::Object result;
+            result.set("ok", true);
+            result.set("queued", true);
+            result.set("cleared", static_cast<int>(cleared));
+            return WriteJson(response, Poco::Net::HTTPResponse::HTTP_ACCEPTED, result);
+        }
+
+        {
+            const std::string videoPrefix = "/api/v1/videos/";
+            if (path.compare(0, videoPrefix.size(), videoPrefix) == 0)
+            {
+                const auto remainder = path.substr(videoPrefix.size());
+                constexpr auto loadSuffix = "/load";
+                const bool loadStored =
+                    remainder.size() > std::char_traits<char>::length(loadSuffix) &&
+                    remainder.compare(
+                        remainder.size() - std::char_traits<char>::length(loadSuffix),
+                        std::char_traits<char>::length(loadSuffix), loadSuffix) == 0;
+                const auto name = loadStored
+                    ? remainder.substr(
+                          0, remainder.size() - std::char_traits<char>::length(loadSuffix))
+                    : remainder;
+                if (!ValidResourceName(name))
+                {
+                    return WriteError(response, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
+                                      "invalid_video_name",
+                                      "Video name must be 1-128 characters of [A-Za-z0-9_.-].");
+                }
+
+                if (loadStored)
+                {
+                    if (method != "POST")
+                    {
+                        return MethodNotAllowed(response, "POST");
+                    }
+                    VideoStore::Entry entry;
+                    if (!_videos.Find(name, entry))
+                    {
+                        return WriteError(response, Poco::Net::HTTPResponse::HTTP_NOT_FOUND,
+                                          "not_found", "No video named " + name + ".");
+                    }
+                    ControlCommand command;
+                    command.type = ControlCommandType::LoadVideo;
+                    command.payload = entry.path;
+                    command.resourceName = name;
+                    if (!_commands.TryEnqueue(command))
+                    {
+                        return WriteError(
+                            response, Poco::Net::HTTPResponse::HTTP_SERVICE_UNAVAILABLE,
+                            "queue_full", "The remote-control command queue is full.");
+                    }
+                    _videos.SetLoading(name);
+                    Poco::JSON::Object result;
+                    result.set("ok", true);
+                    result.set("queued", true);
+                    result.set("name", name);
+                    return WriteJson(response, Poco::Net::HTTPResponse::HTTP_ACCEPTED, result);
+                }
+
+                if (method == "DELETE")
+                {
+                    const auto playback = _videos.GetPlayback();
+                    const bool isCurrent = playback.name == name &&
+                                           playback.state != "disabled";
+                    if (isCurrent)
+                    {
+                        ControlCommand command;
+                        command.type = ControlCommandType::DisableVideo;
+                        if (!_commands.TryEnqueue(command))
+                        {
+                            return WriteError(
+                                response, Poco::Net::HTTPResponse::HTTP_SERVICE_UNAVAILABLE,
+                                "queue_full", "The remote-control command queue is full.");
+                        }
+                    }
+                    if (!_videos.Remove(name))
+                    {
+                        return WriteError(response, Poco::Net::HTTPResponse::HTTP_NOT_FOUND,
+                                          "not_found", "No video named " + name + ".");
+                    }
+                    Poco::JSON::Object result;
+                    result.set("ok", true);
+                    result.set("removed", name);
+                    result.set("disableQueued", isCurrent);
+                    return WriteJson(response, Poco::Net::HTTPResponse::HTTP_OK, result);
+                }
+                if (method != "PUT")
+                {
+                    return MethodNotAllowed(response, "PUT, DELETE");
+                }
+
+                std::string body;
+                if (!ReadBody(request, response, videoBodyLimit, body))
+                {
+                    return;
+                }
+                if (body.empty())
+                {
+                    return WriteError(response, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
+                                      "invalid_video", "Video upload must not be empty.");
+                }
+
+                const auto entry = _videos.Set(name, body);
+                ControlCommand command;
+                command.type = ControlCommandType::LoadVideo;
+                command.payload = entry.path;
+                command.resourceName = name;
+                if (!_commands.TryEnqueue(command))
+                {
+                    return WriteError(response, Poco::Net::HTTPResponse::HTTP_SERVICE_UNAVAILABLE,
+                                      "queue_full", "The remote-control command queue is full.");
+                }
+                _videos.SetLoading(name);
+                Poco::JSON::Object result;
+                result.set("ok", true);
+                result.set("queued", true);
+                result.set("name", name);
+                result.set("sizeBytes", static_cast<Poco::UInt64>(entry.sizeBytes));
+                return WriteJson(response, Poco::Net::HTTPResponse::HTTP_ACCEPTED, result);
+            }
+        }
+
         if (path == "/api/v1/textures")
         {
             // Named in-memory textures served to presets via image=<name>.
@@ -745,7 +935,7 @@ void ApiRequestHandler::handleRequest(Poco::Net::HTTPServerRequest& request,
             if (path.compare(0, texturePrefix.size(), texturePrefix) == 0)
             {
                 const auto name = path.substr(texturePrefix.size());
-                if (!ValidTextureName(name))
+                if (!ValidResourceName(name))
                 {
                     return WriteError(response, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
                                       "invalid_texture_name",
@@ -833,7 +1023,7 @@ void ApiRequestHandler::handleRequest(Poco::Net::HTTPServerRequest& request,
             if (path.compare(0, shaderPrefix.size(), shaderPrefix) == 0)
             {
                 const auto name = path.substr(shaderPrefix.size());
-                if (!ValidTextureName(name))
+                if (!ValidResourceName(name))
                 {
                     return WriteError(response, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
                                       "invalid_shader_name",
@@ -1675,6 +1865,7 @@ ApiRequestHandlerFactory::ApiRequestHandlerFactory(ControlCommandQueue& commands
                                                    VisualStateStore& visuals,
                                                    PlaybackStateStore& playback,
                                                    TextureStore& textures,
+                                                   VideoStore& videos,
                                                    ShaderChainStore& shaders,
                                                    ConfigLayers configLayers)
     : _commands(commands)
@@ -1683,6 +1874,7 @@ ApiRequestHandlerFactory::ApiRequestHandlerFactory(ControlCommandQueue& commands
     , _visuals(visuals)
     , _playback(playback)
     , _textures(textures)
+    , _videos(videos)
     , _shaders(shaders)
     , _configLayers(std::move(configLayers))
 {
@@ -1692,5 +1884,6 @@ Poco::Net::HTTPRequestHandler* ApiRequestHandlerFactory::createRequestHandler(
     const Poco::Net::HTTPServerRequest&)
 {
     return new ApiRequestHandler(_commands, _jobs, _presets, _visuals,
-                                 _playback, _textures, _shaders, _configLayers);
+                                 _playback, _textures, _videos, _shaders,
+                                 _configLayers);
 }

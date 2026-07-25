@@ -5,6 +5,7 @@
 #include "gui/ProjectMGUI.h"
 
 #include <Poco/NotificationCenter.h>
+#include <Poco/Path.h>
 
 #include <Poco/Util/Application.h>
 
@@ -17,6 +18,7 @@
 #include <algorithm>
 #include <map>
 #include <string>
+#include <utility>
 
 RenderLoop::RenderLoop()
     : _audioCapture(Poco::Util::Application::instance().getSubsystem<AudioCapture>())
@@ -79,6 +81,9 @@ void RenderLoop::Run()
         {
             _videoDeck = std::make_unique<VideoDeck>(pocVideoPath);
             _videoDeck->Initialize();
+            _networkControl.Videos().SetPlaying(
+                Poco::Path(pocVideoPath).getFileName(),
+                _videoDeck->Width(), _videoDeck->Height());
         }
         catch (const std::exception& ex)
         {
@@ -87,10 +92,8 @@ void RenderLoop::Run()
         }
     }
 
-    // POC two-deck overlay: deck 0 runs an overlay preset (e.g. an equalizer) as
-    // the compositor base; the video deck is exposed as the "video" texture and a
-    // composite shader pass draws the preset over it. Requires post-processing
-    // (--enableVisualPostProcessing).
+    // Deck 0 is the compositor base and the video decoder is exposed as the
+    // named "video" texture. This needs only one projectM deck.
     if (_videoDeck && _visualPostProcessor.Active())
     {
         const std::string overlayPreset =
@@ -105,22 +108,7 @@ void RenderLoop::Run()
             projectm_set_preset_locked(_projectMWrapper.DeckAt(0).ProjectM(), true);
         }
 
-        // uInput = deck 0 (overlay preset), uTexture = the video. Draw the video
-        // as a dimmed base with the preset added on top (video is v-flipped because
-        // its texture is stored top-row-first).
-        _networkControl.Shaders().SetShader("pocVideoComposite", std::string(
-            "uniform float videoLevel;\n"
-            "vec4 effect(vec2 uv){\n"
-            "  vec3 base = texture(uInput, uv).rgb;\n"
-            "  vec3 vid = texture(uTexture, vec2(uv.x, 1.0 - uv.y)).rgb;\n"
-            "  vec3 o = vid * videoLevel + base;\n"
-            "  return vec4(min(o, vec3(1.0)), 1.0);\n"
-            "}\n"));
-        ShaderPassConfig pass;
-        pass.shader = "pocVideoComposite";
-        pass.texture = "video";
-        pass.params["videoLevel"] = 0.7F;
-        _networkControl.Shaders().SetChain({pass});
+        EnsureVideoCompositePass();
     }
 
     while (!_wantsToQuit)
@@ -190,6 +178,50 @@ void RenderLoop::Run()
         projectm_playlist_set_preset_switched_event_callback(
             _projectMWrapper.DeckAt(deck).Playlist(), nullptr, nullptr);
     }
+}
+
+void RenderLoop::EnsureVideoCompositePass()
+{
+    constexpr auto shaderName = "pocVideoComposite";
+    _networkControl.Shaders().SetShader(shaderName, std::string(
+        "uniform float videoLevel;\n"
+        "vec4 effect(vec2 uv){\n"
+        "  vec3 base = texture(uInput, uv).rgb;\n"
+        "  vec3 vid = texture(uTexture, vec2(uv.x, 1.0 - uv.y)).rgb;\n"
+        "  vec3 o = vid * videoLevel + base;\n"
+        "  return vec4(min(o, vec3(1.0)), 1.0);\n"
+        "}\n"));
+
+    auto chain = _networkControl.Shaders().GetSnapshot().chain;
+    chain.erase(
+        std::remove_if(chain.begin(), chain.end(),
+                       [](const ShaderPassConfig& pass) {
+                           return pass.shader == "pocVideoComposite";
+                       }),
+        chain.end());
+
+    ShaderPassConfig videoPass;
+    videoPass.shader = shaderName;
+    videoPass.texture = "video";
+    videoPass.params["videoLevel"] = 0.7F;
+    chain.insert(chain.begin(), std::move(videoPass));
+    _networkControl.Shaders().SetChain(std::move(chain));
+}
+
+void RenderLoop::RemoveVideoCompositePass()
+{
+    auto chain = _networkControl.Shaders().GetSnapshot().chain;
+    const auto firstRemoved = std::remove_if(
+        chain.begin(), chain.end(),
+        [](const ShaderPassConfig& pass) {
+            return pass.shader == "pocVideoComposite";
+        });
+    if (firstRemoved == chain.end())
+    {
+        return;
+    }
+    chain.erase(firstRemoved, chain.end());
+    _networkControl.Shaders().SetChain(std::move(chain));
 }
 
 void RenderLoop::DrainNetworkCommands()
@@ -282,6 +314,43 @@ void RenderLoop::DrainNetworkCommands()
                 // toast state on the same thread that draws it.
                 Poco::NotificationCenter::defaultCenter().postNotification(
                     new DisplayToastNotification(command.toast));
+                continue;
+
+            case ControlCommandType::LoadVideo:
+                try
+                {
+                    // Initialize the replacement completely before releasing the
+                    // current decoder, so a failed upload does not stop playback.
+                    auto replacement = std::make_unique<VideoDeck>(command.payload);
+                    replacement->Initialize();
+                    const int width = replacement->Width();
+                    const int height = replacement->Height();
+                    _videoDeck = std::move(replacement);
+                    if (_visualPostProcessor.Active())
+                    {
+                        EnsureVideoCompositePass();
+                    }
+                    _networkControl.Videos().SetPlaying(
+                        command.resourceName, width, height);
+                    poco_information_f1(_logger, "Runtime video playing: %s",
+                                        command.resourceName);
+                }
+                catch (const std::exception& error)
+                {
+                    _networkControl.Videos().SetError(command.resourceName, error.what());
+                    poco_error_f2(_logger, "Runtime video failed (%s): %s",
+                                  command.resourceName, std::string(error.what()));
+                }
+                continue;
+
+            case ControlCommandType::DisableVideo:
+                _videoDeck.reset();
+                if (_visualPostProcessor.Active())
+                {
+                    RemoveVideoCompositePass();
+                }
+                _networkControl.Videos().SetDisabled();
+                poco_information(_logger, "Runtime video disabled.");
                 continue;
         }
     }
